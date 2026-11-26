@@ -102,3 +102,45 @@ test('close routes home; scan routes bills; initial pre-fills amount', async () 
   expect(go).toHaveBeenCalledWith('bills');
   expect(await db.entries.count()).toBe(0);
 });
+
+test('note is saved (expense and collection)', async () => {
+  const go = vi.fn();
+  render(<AddEntry onGo={go} />);
+  await screen.findByText('Metro');
+  fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: ' fish delivery ' } });
+  tap('4');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect((await db.entries.toArray())[0].note).toBe('fish delivery');
+});
+
+test('a failed payment write rolls back entry and new supplier; retry does not duplicate', async () => {
+  const go = vi.fn();
+  render(<AddEntry onGo={go} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: '+ New' }));
+  fireEvent.change(screen.getByLabelText('Supplier name'), { target: { value: 'Halles' } });
+  tap('7');
+  const spy = vi.spyOn(db.payments, 'put').mockRejectedValueOnce(new Error('boom'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await screen.findByRole('alert');
+  expect(go).not.toHaveBeenCalled();
+  expect(await db.entries.count()).toBe(0);
+  expect(await db.suppliers.count()).toBe(1);
+  spy.mockRestore();
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect(await db.entries.count()).toBe(1);
+  expect(await db.suppliers.count()).toBe(2);
+  expect(await db.payments.count()).toBe(1);
+});
+
+test('initial.supplierId pre-selects its default category', async () => {
+  const go = vi.fn();
+  const metro = (await db.suppliers.toArray())[0];
+  render(<AddEntry onGo={go} initial={{ supplierId: metro.id, amountIncl: 1000 }} />);
+  await waitFor(() => expect(screen.getByText('Dry goods & groceries')).toHaveAttribute('aria-pressed', 'true'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect((await db.entries.toArray())[0]).toMatchObject({ supplierId: metro.id, categoryId: 'cat:expense:3' });
+});

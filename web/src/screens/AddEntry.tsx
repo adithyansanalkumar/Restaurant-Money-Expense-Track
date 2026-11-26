@@ -7,12 +7,15 @@ import { pressKey, type KeypadKey } from '../domain/keypad';
 import { parseAmount } from '../domain/money';
 import { paymentsForPaidNow } from '../domain/credit';
 import type { Category, Entry, Id, Supplier } from '../domain/types';
+import { db } from '../db/db';
+import { getDeviceId } from '../db/device';
 import { listLive, put } from '../db/repo';
 import { t, useLanguage } from '../i18n';
 import { COUNTRY_DEFAULTS, useSettings } from '../settings/store';
 
 type Method = Entry['method'];
 const METHODS: Method[] = ['cash', 'card', 'transfer', 'other'];
+const OTHER_EXPENSE_ID = 'cat:expense:13';
 const IN = '#6FE3A0';
 const OUT = '#FF8E8E';
 
@@ -72,6 +75,7 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
   const [method, setMethod] = useState<Method>(initial?.method ?? 'cash');
   const [status, setStatus] = useState<'paid' | 'credit'>(initial?.status ?? 'paid');
   const [dueDate, setDueDate] = useState(initial?.dueDate ?? '');
+  const [note, setNote] = useState(initial?.note ?? '');
   const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -85,7 +89,11 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
       const [s, c, e] = await Promise.all([
         listLive<Supplier>('suppliers'), listLive<Category>('categories'), listLive<Entry>('entries'),
       ]);
-      if (live) { setSuppliers(s); setCategories(c); setEntries(e); }
+      if (live) {
+        setSuppliers(s); setCategories(c); setEntries(e);
+        const sup = initial?.supplierId ? s.find((x) => x.id === initial.supplierId) : undefined;
+        if (sup?.defaultCategoryId) setCategoryId((cur) => cur ?? sup.defaultCategoryId);
+      }
     })();
     return () => { live = false; };
   }, []);
@@ -130,34 +138,38 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
     setBusy(true);
     setError(false);
     try {
-      let sid = supplierId;
-      let cat = categoryId;
-      if (kind === 'expense') {
-        const name = newName.trim();
-        if (creating && name) {
-          const s = await put<Supplier>('suppliers', { name, defaultCategoryId: cat });
-          sid = s.id;
-        } else if (sid && cat) {
-          const s = suppliers.find((x) => x.id === sid);
-          if (s && !s.defaultCategoryId) await put<Supplier>('suppliers', { ...s, defaultCategoryId: cat });
+      await getDeviceId();
+      await db.transaction('rw', [db.suppliers, db.entries, db.payments, db.meta], async () => {
+        let sid = supplierId;
+        let cat = categoryId;
+        if (kind === 'expense') {
+          const name = newName.trim();
+          if (creating && name) {
+            const s = await put<Supplier>('suppliers', { name, defaultCategoryId: cat });
+            sid = s.id;
+          } else if (sid && cat) {
+            const s = suppliers.find((x) => x.id === sid);
+            if (s && !s.defaultCategoryId) await put<Supplier>('suppliers', { ...s, defaultCategoryId: cat });
+          }
+          cat ??= OTHER_EXPENSE_ID;
         }
-        cat ??= expenseCats.find((c) => c.name === 'Other')?.id ?? '';
-      }
-      const channelCat = incomeCats.find((c) => c.id === channelSel);
-      const base = {
-        kind, date, amountIncl: cents, method, createdBy: '',
-        ...(initial?.photoId ? { photoId: initial.photoId } : {}),
-        ...(initial?.note ? { note: initial.note } : {}),
-        ...(initial?.amountExcl !== undefined ? { amountExcl: initial.amountExcl } : {}),
-        ...(initial?.tax !== undefined ? { tax: initial.tax } : {}),
-      };
-      const entry = kind === 'expense'
-        ? await put<Entry>('entries', {
-            ...base, categoryId: cat ?? '', ...(sid ? { supplierId: sid } : {}), status,
-            ...(status === 'credit' && dueDate ? { dueDate } : {}),
-          })
-        : await put<Entry>('entries', { ...base, categoryId: channelCat?.id ?? '', channel: channelCat?.name ?? '' });
-      for (const p of paymentsForPaidNow(entry)) await put('payments', p);
+        const channelCat = incomeCats.find((c) => c.id === channelSel);
+        const noteText = note.trim();
+        const base = {
+          kind, date, amountIncl: cents, method, createdBy: '',
+          ...(noteText ? { note: noteText } : {}),
+          ...(initial?.photoId ? { photoId: initial.photoId } : {}),
+          ...(initial?.amountExcl !== undefined ? { amountExcl: initial.amountExcl } : {}),
+          ...(initial?.tax !== undefined ? { tax: initial.tax } : {}),
+        };
+        const entry = kind === 'expense'
+          ? await put<Entry>('entries', {
+              ...base, categoryId: cat ?? '', ...(sid ? { supplierId: sid } : {}), status,
+              ...(status === 'credit' && dueDate ? { dueDate } : {}),
+            })
+          : await put<Entry>('entries', { ...base, categoryId: channelCat?.id ?? '', channel: channelCat?.name ?? '' });
+        for (const p of paymentsForPaidNow(entry)) await put('payments', p);
+      });
       onGo('home');
     } catch {
       setError(true);
@@ -274,6 +286,8 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
             )}
           </>
         )}
+        <input className="field" aria-label={t('add.note')} placeholder={t('add.note')} value={note}
+          onChange={(e) => setNote(e.target.value)} style={{ ...dateInput, width: '100%', fontWeight: 500 }} />
       </Glass>
 
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>

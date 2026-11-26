@@ -67,4 +67,5 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'method.card': 'Carte',
   'method.transfer': 'Virement',
   'method.other': 'Autre',
+  'add.note': 'Note (facultatif)',
 };

@@ -65,4 +65,5 @@ export const en = {
   'method.card': 'Card',
   'method.transfer': 'Transfer',
   'method.other': 'Other',
+  'add.note': 'Note (optional)',
 } as const;
