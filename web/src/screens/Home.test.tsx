@@ -78,7 +78,7 @@ test('See all routes to history; recent shows at most 5; sync button renders', a
   const go = vi.fn();
   render(<Home onGo={go} />);
   await screen.findByText('Recent activity');
-  expect(screen.getAllByTestId('recent-row')).toHaveLength(5);
+  expect(await screen.findAllByTestId('recent-row')).toHaveLength(5);
   expect(screen.getByRole('button', { name: 'Sync now' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'See all' }));
   expect(go).toHaveBeenCalledWith('history');
@@ -90,4 +90,10 @@ test('excl view: entries lacking amountExcl are marked and Home notes the count'
   render(<Home onGo={vi.fn()} />);
   expect(await screen.findByText('1 amount includes tax')).toBeTruthy();
   expect(screen.getAllByTestId('incl-tag').length).toBeGreaterThan(0);
+});
+
+test('the sync button runs a sync; signed out it offers "Sign in to sync"', async () => {
+  render(<Home onGo={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }));
+  expect(await screen.findByRole('button', { name: 'Sign in to sync' })).toBeTruthy();
 });

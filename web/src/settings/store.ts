@@ -27,6 +27,12 @@ export function loadSettings(): Promise<void> {
   return (loading ??= doLoad());
 }
 
+/** Re-read settings from IndexedDB (after a sync brought new shared settings). */
+export function reloadSettings(): Promise<void> {
+  loading = doLoad();
+  return loading;
+}
+
 async function doLoad(): Promise<void> {
   const shared = (await db.settings.get('shared')) ?? null;
   const row = await db.meta.get('device');

@@ -11,6 +11,8 @@ import type { Category, Entry, Payment, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
 import { t, useLanguage } from '../i18n';
 import { useSettings } from '../settings/store';
+import { SyncStatus } from '../ui/SyncStatus';
+import { syncNow, useSyncStatus } from '../sync/sync';
 
 const IN = '#6FE3A0';
 const OUT = '#FF8E8E';
@@ -28,6 +30,7 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [ready, setReady] = useState(false);
+  const { running, revision } = useSyncStatus();
 
   useEffect(() => {
     let live = true;
@@ -38,7 +41,7 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
       if (live) { setEntries(e); setPayments(p); setSuppliers(s); setCategories(c); setReady(true); }
     })();
     return () => { live = false; };
-  }, []);
+  }, [revision]);
 
   const today = todayISO();
   const ws = device.weekStart;
@@ -81,8 +84,9 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <div style={{ fontSize: 13, color: '#C6D8E6' }}>{dateFmt({ weekday: 'long', day: 'numeric', month: 'long' }, today)}</div>
           <div style={{ fontFamily: "'Inter Tight', sans-serif", fontSize: 26, fontWeight: 800, letterSpacing: -0.5 }}>{shared?.restaurantName}</div>
+          <SyncStatus />
         </div>
-        <button type="button" className="glass" aria-label={t('home.sync')}
+        <button type="button" className="glass" aria-label={t('home.sync')} aria-busy={running} disabled={running} onClick={() => { void syncNow(); }}
           style={{ width: 46, height: 46, borderRadius: 23, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFFFFF' }}>
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16" /><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8" /><path d="M21 3v5h-5" /><path d="M3 21v-5h5" /></svg>
         </button>
