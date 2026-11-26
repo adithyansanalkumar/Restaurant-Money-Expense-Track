@@ -1,0 +1,50 @@
+import 'fake-indexeddb/auto';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { db } from './db';
+import { getDeviceId } from './device';
+import { listLive, put, seedDefaults, softDelete } from './repo';
+import type { Category, Supplier } from '../domain/types';
+
+beforeEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(db.tables.map((t) => t.clear()));
+});
+
+describe('repo', () => {
+  it('put stamps updatedAt and deviceId and is idempotent by id', async () => {
+    const a = await put<Supplier>('suppliers', { id: 's1', name: 'Farm' });
+    expect(a.deviceId).toBe(await getDeviceId());
+    expect(a.updatedAt).toBeGreaterThan(0);
+    expect(a.deleted).toBe(false);
+    await put<Supplier>('suppliers', { id: 's1', name: 'Farm 2' });
+    const all = await db.suppliers.toArray();
+    expect(all).toHaveLength(1);
+    expect(all[0].name).toBe('Farm 2');
+    const b = await put<Supplier>('suppliers', { name: 'New' } as never);
+    expect(b.id).toBeTruthy();
+  });
+
+  it('softDelete hides from listLive but row still exists with deleted=true and a newer updatedAt', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    await put<Supplier>('suppliers', { id: 's1', name: 'Farm' });
+    vi.spyOn(Date, 'now').mockReturnValue(2000);
+    await softDelete('suppliers', 's1');
+    vi.restoreAllMocks();
+    expect(await listLive<Supplier>('suppliers')).toHaveLength(0);
+    const row = await db.suppliers.get('s1');
+    expect(row?.deleted).toBe(true);
+    expect(row!.updatedAt).toBe(2000);
+  });
+
+  it('seedDefaults twice creates 14 expense categories and 5 income channels once', async () => {
+    await seedDefaults();
+    await seedDefaults();
+    const cats = await listLive<Category>('categories');
+    expect(cats.filter((c) => c.kind === 'expense')).toHaveLength(14);
+    expect(cats.filter((c) => c.kind === 'income')).toHaveLength(5);
+    expect(cats).toHaveLength(19);
+    const c0 = await db.categories.get('cat:expense:0');
+    expect(c0?.deviceId).toBe('seed');
+    expect(c0?.updatedAt).toBe(0);
+  });
+});
