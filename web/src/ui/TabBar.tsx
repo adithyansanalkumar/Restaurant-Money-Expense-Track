@@ -21,7 +21,8 @@ export function TabBar({ current, onGo }: { current: Route; onGo: (r: Route) => 
       <a key={t.route} href={`#/${t.route}`} onClick={click(t.route)}
         aria-current={active ? 'page' : undefined}
         style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, textDecoration: 'none',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          alignSelf: 'stretch', minHeight: 44, gap: 3, textDecoration: 'none',
           color: active ? '#FFFFFF' : '#B3C8D9', fontSize: 10, fontWeight: active ? 700 : 500,
         }}>
         {t.icon}{t.label}
