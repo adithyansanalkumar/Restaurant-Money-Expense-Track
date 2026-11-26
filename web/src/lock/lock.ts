@@ -35,15 +35,25 @@ const read = async (): Promise<LockRow | null> => ((await db.meta.get('lock'))?.
 const write = (v: LockRow) => db.meta.put({ key: 'lock', value: v });
 
 /** `iterations` is injectable for tests only; production callers omit it. */
+const pinListeners = new Set<(has: boolean) => void>();
+/** Subscribe to PIN set/clear so callers can keep a synchronous cache. */
+export function onPinChange(cb: (has: boolean) => void): () => void {
+  pinListeners.add(cb);
+  return () => { pinListeners.delete(cb); };
+}
+const notify = (has: boolean) => pinListeners.forEach((l) => l(has));
+
 export async function setPin(pin: string, iterations: number = PBKDF2_ITERATIONS): Promise<void> {
   if (!/^\d{4,6}$/.test(pin)) throw new Error('PIN must be 4 to 6 digits');
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await derive(pin, salt, iterations);
   await write({ salt: b64(salt), hash: b64(hash), iterations, fails: 0, lockedUntil: 0 });
+  notify(true);
 }
 
 export async function clearPin(): Promise<void> {
-  await db.meta.delete('lock');
+  await db.meta.bulkDelete(['lock', 'biometric']);
+  notify(false);
 }
 
 export async function hasPin(): Promise<boolean> {

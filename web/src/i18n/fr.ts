@@ -218,4 +218,5 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'pin.save': 'Enregistrer le code',
   'pin.next': 'Suivant',
   'pin.error': 'Impossible d’enregistrer le code.',
+  'lock.checkFailed': "Impossible de vérifier le verrou — rouvrez l’application.",
 };

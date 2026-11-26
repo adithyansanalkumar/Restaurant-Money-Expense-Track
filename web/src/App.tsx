@@ -13,7 +13,7 @@ import { AddEntry } from './screens/AddEntry';
 import { t, useLanguage } from './i18n';
 import { useSettings } from './settings/store';
 import { Lock } from './screens/Lock';
-import { hasPin, shouldLock } from './lock/lock';
+import { hasPin, onPinChange, shouldLock } from './lock/lock';
 
 export function App() {
   useLanguage();
@@ -22,13 +22,27 @@ export function App() {
   const { loaded, shared } = useSettings();
   const needsSetup = loaded && !shared;
   // 'checking' until we know whether a PIN exists; while 'locked' nothing else renders.
-  const [lockState, setLockState] = useState<'checking' | 'locked' | 'open'>('checking');
+  // 'error' = the lock could not be read: fail closed, never open.
+  const [lockState, setLockState] = useState<'checking' | 'locked' | 'open' | 'error'>('checking');
   const hiddenAt = useRef<number | null>(null);
+  // Synchronous cache of "a PIN is set", so re-locking needs no await. null = unknown.
+  const pinSet = useRef<boolean | null>(null);
 
   useEffect(() => {
     let live = true;
-    void hasPin().then((p) => { if (live) setLockState(p ? 'locked' : 'open'); }, () => { if (live) setLockState('open'); });
-    return () => { live = false; };
+    const check = async () => {
+      let p: boolean | undefined;
+      for (let i = 0; i < 2 && p === undefined; i++) {
+        try { p = await hasPin(); } catch { /* retry once */ }
+      }
+      if (!live) return;
+      if (p === undefined) { setLockState('error'); return; }
+      pinSet.current = p;
+      setLockState(p ? 'locked' : 'open');
+    };
+    void check();
+    const off = onPinChange((has) => { pinSet.current = has; });
+    return () => { live = false; off(); };
   }, []);
 
   useEffect(() => {
@@ -36,8 +50,8 @@ export function App() {
       if (document.visibilityState === 'hidden') { hiddenAt.current = Date.now(); return; }
       const at = hiddenAt.current;
       hiddenAt.current = null;
-      if (at !== null && shouldLock(at, Date.now())) {
-        void hasPin().then((p) => { if (p) setLockState('locked'); });
+      if (at !== null && pinSet.current !== false && shouldLock(at, Date.now())) {
+        setLockState((s) => (s === 'checking' ? s : pinSet.current === null ? 'error' : 'locked'));
       }
     };
     document.addEventListener('visibilitychange', onVis);
@@ -54,6 +68,9 @@ export function App() {
   useEffect(() => { if (route !== 'add') setEditing(null); }, [route]);
 
   if (lockState === 'locked') return <Lock onUnlock={() => setLockState('open')} />;
+  if (lockState === 'error') {
+    return <div className="scene app-shell"><Glass role="alert" style={{ borderRadius: 24, padding: 20, color: '#FFFFFF', textAlign: 'center' }}>{t('lock.checkFailed')}</Glass></div>;
+  }
   if (!loaded || lockState === 'checking') return <div className="scene app-shell" />;
   if (route === 'setup' || (needsSetup && route !== 'join')) {
     return <div className="scene app-shell"><Setup onGo={go} /></div>;

@@ -216,4 +216,5 @@ export const en = {
   'pin.save': 'Save PIN',
   'pin.next': 'Next',
   'pin.error': 'Could not save the PIN.',
+  'lock.checkFailed': "Couldn’t check the lock — reopen the app.",
 } as const;

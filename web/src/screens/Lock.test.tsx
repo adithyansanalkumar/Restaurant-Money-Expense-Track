@@ -19,6 +19,7 @@ beforeEach(async () => {
   window.location.hash = '';
 });
 
+const ready = () => waitFor(() => expect(screen.getByRole('button', { name: '1' })).toBeEnabled());
 const type = (pin: string) => pin.split('').forEach((d) => fireEvent.click(screen.getByRole('button', { name: d })));
 
 test('with a PIN, the lock shows on cold start and no other screen renders', async () => {
@@ -33,6 +34,7 @@ test('wrong PIN shows a message; right PIN unlocks', async () => {
   await setPin('1234', 1000);
   render(<App />);
   await screen.findByText('App locked');
+  await ready();
   type('1111');
   fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
   expect(await screen.findByText('Wrong PIN. Try again.')).toBeTruthy();
@@ -45,10 +47,12 @@ test('5 wrong PINs show a lockout countdown', async () => {
   await setPin('1234', 1000);
   render(<App />);
   await screen.findByText('App locked');
+  await ready();
   for (let i = 0; i < 5; i++) {
     type('0000');
     fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
     await waitFor(() => expect(screen.getAllByTestId('pin-dot')[0].getAttribute('data-filled')).toBe('false'));
+    if (i < 4) await ready();
   }
   expect(await screen.findByText(/Try again in 30 s/)).toBeTruthy();
 });
@@ -57,6 +61,7 @@ test('re-locks when visible again after 3 minutes hidden, not after less', async
   await setPin('1234', 1000);
   render(<App />);
   await screen.findByText('App locked');
+  await ready();
   type('1234');
   fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
   await screen.findByText('Recent activity');

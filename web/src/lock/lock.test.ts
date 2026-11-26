@@ -38,6 +38,13 @@ describe('PIN', () => {
     expect(await hasPin()).toBe(false);
   });
 
+  it('clearPin also removes the biometric entry', async () => {
+    await setPin('1234', IT);
+    await db.meta.put({ key: 'biometric', value: 'abc' });
+    await clearPin();
+    expect(await db.meta.get('biometric')).toBeUndefined();
+  });
+
   it('clearPin removes the lock', async () => {
     await setPin('1234', IT);
     await clearPin();

@@ -8,7 +8,7 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
   useLanguage();
   const [pin, setPin] = useState('');
   const [wrong, setWrong] = useState(false);
-  const [remaining, setRemaining] = useState(0);
+  const [remaining, setRemaining] = useState<number | null>(null);
   const [bio, setBio] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -20,10 +20,10 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (remaining <= 0) return;
+    if ((remaining ?? 0) <= 0) return;
     const id = setInterval(() => { void lockoutRemainingMs().then(setRemaining); }, 1000);
     return () => clearInterval(id);
-  }, [remaining > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [(remaining ?? 0) > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tryBio = useCallback(async () => { if (await unlockBiometric()) onUnlock(); }, [onUnlock]);
 
@@ -38,7 +38,8 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
     } finally { setBusy(false); }
   };
 
-  const locked = remaining > 0;
+  const ready = remaining !== null;
+  const locked = (remaining ?? 0) > 0;
   const bioBtn = bio ? (
     <button type="button" className="key" aria-label={t('lock.biometric')} onClick={() => void tryBio()}
       style={{ height: 54, minWidth: 44, width: '100%', borderRadius: 20, color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -55,11 +56,11 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
         <div style={{ fontFamily: "'Inter Tight', sans-serif", fontSize: 26, fontWeight: 800 }}>{t('lock.title')}</div>
         <Glass style={{ alignSelf: 'stretch', borderRadius: 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
           <div style={{ fontSize: 14, color: '#C6D8E6' }}>{t('lock.enter')}</div>
-          <PinPad value={pin} onChange={(v) => { setPin(v); setWrong(false); }} disabled={locked || busy} shake={wrong} extra={bioBtn} />
+          <PinPad value={pin} onChange={(v) => { setPin(v); setWrong(false); }} disabled={!ready || locked || busy} shake={wrong} extra={bioBtn} />
           {locked
-            ? <div role="alert" style={{ fontSize: 13, color: '#FF8E8E', textAlign: 'center' }}>{t('lock.locked', { s: Math.ceil(remaining / 1000) })}</div>
+            ? <div role="alert" style={{ fontSize: 13, color: '#FF8E8E', textAlign: 'center' }}>{t('lock.locked', { s: Math.ceil((remaining ?? 0) / 1000) })}</div>
             : wrong && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E' }}>{t('lock.wrong')}</div>}
-          <button type="button" style={primaryBtn} disabled={locked || busy || pin.length < 4} onClick={() => void submit()}>{t('lock.unlock')}</button>
+          <button type="button" style={primaryBtn} disabled={!ready || locked || busy || pin.length < 4} onClick={() => void submit()}>{t('lock.unlock')}</button>
         </Glass>
       </div>
     </div>
