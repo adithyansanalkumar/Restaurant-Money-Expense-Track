@@ -16,8 +16,10 @@ export async function put<T extends Base>(
 ): Promise<T> {
   const id = obj.id ?? crypto.randomUUID();
   // read + write in one transaction so a sync apply can't land between them
+  // resolved before the transaction opens: awaiting another transaction's pending promise
+  // inside this one could let IndexedDB auto-commit it
+  const deviceId = await getDeviceId();
   return db.transaction('rw', [tbl(table), db.meta], async () => {
-    const deviceId = await getDeviceId();
     const existing = obj.id ? await tbl(table).get(id) : undefined;
     const row = {
       ...obj,
@@ -33,6 +35,7 @@ export async function put<T extends Base>(
 }
 
 export async function softDelete(table: SyncedTable, id: string): Promise<void> {
+  const deviceId = await getDeviceId();
   await db.transaction('rw', [tbl(table), db.meta], async () => {
     const t = tbl(table);
     const row = await t.get(id);
@@ -41,7 +44,7 @@ export async function softDelete(table: SyncedTable, id: string): Promise<void> 
       ...row,
       deleted: true,
       updatedAt: Math.max(Date.now(), row.updatedAt + 1),
-      deviceId: await getDeviceId(),
+      deviceId,
     });
   });
 }

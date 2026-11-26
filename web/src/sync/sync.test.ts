@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../db/db';
 import { put, softDelete } from '../db/repo';
+import { _resetDeviceIdCache } from '../db/device';
 import type { Entry, Supplier } from '../domain/types';
 import type { Ledger } from './merge';
 
@@ -30,7 +31,7 @@ const drive = {
     return all.filter(([, f]) => !f.hidden).sort(([, x], [, y]) => x.created - y.created)[0]?.[0] ?? null;
   }),
   listFiles: vi.fn(async (_name: string, parent: string, n = 1) => listImpl(parent, n)),
-  findFile: vi.fn(async (_name: string, parent: string) => listImpl(parent, 1)[0] ?? null),
+  findFile: vi.fn(async (_name: string, parent: string): Promise<{ id: string; version: string } | null> => listImpl(parent, 1)[0] ?? null),
   readJson: vi.fn(async (id: string) => readImpl(id)),
   getVersion: vi.fn(async (id: string) => String(files.get(id)!.version)),
   writeJson: vi.fn(async (id: string | null, name: string, parent: string, data: unknown) => writeImpl(id, name, parent, data)),
@@ -262,7 +263,7 @@ describe('two phones creating the ledger at the same time', () => {
     const r = await syncNow();
     expect(drive.writeJson.mock.calls[0][0]).toBeNull(); // we did create one
     expect(r.status).toBe('ok');
-    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ folderId: 'folder1', fileId: 'ledgerB' });
+    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ folderId: 'folder1', fileId: 'ledgerB', createdHere: true });
     expect((files.get('ledgerB')!.data as Ledger).suppliers.map((x) => x.id)).toEqual(['A1', 'B1']);
     expect(await db.suppliers.get('B1')).toBeTruthy();
   });
@@ -278,7 +279,7 @@ describe('two phones creating the ledger at the same time', () => {
     // later B's file shows up in listings
     files.get('ledgerB')!.hidden = false;
     expect((await syncNow()).status).toBe('ok');
-    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ folderId: 'folder1', fileId: 'ledgerB' });
+    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ folderId: 'folder1', fileId: 'ledgerB', createdHere: true });
     expect((files.get('ledgerB')!.data as Ledger).suppliers.map((x) => x.id)).toEqual(['A1', 'B1']);
     // phone B (fresh device DB, its own ref to ledgerB, created there) stays put and gets A's rows
     await Promise.all(db.tables.map((t) => t.clear()));
@@ -295,8 +296,66 @@ describe('two phones creating the ledger at the same time', () => {
     files.set('ledgerB', { data: theirs(), version: 1, parent: 'folderB', created: 1 });
     await put<Supplier>('suppliers', { id: 'A1', name: 'Ours' });
     expect((await syncNow()).status).toBe('ok');
-    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ folderId: 'folderB', fileId: 'ledgerB' });
+    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ folderId: 'folderB', fileId: 'ledgerB', createdHere: true });
     expect((files.get('ledgerB')!.data as Ledger).suppliers.map((x) => x.id)).toEqual(['A1', 'B1']);
+  });
+
+  it('listing lag can cross the phones after creation; createdHere is kept so the next syncs converge on the oldest', async () => {
+    type Dump = Record<string, unknown[]>;
+    const dump = async (): Promise<Dump> => Object.fromEntries(await Promise.all(db.tables.map(async (t) => [t.name, await t.toArray()])));
+    const load = async (d: Dump) => {
+      await Promise.all(db.tables.map((t) => t.clear()));
+      for (const t of db.tables) await t.bulkPut((d[t.name] ?? []) as never[]);
+      _resetDeviceIdCache();
+    };
+    const fresh = async (deviceId: string) => {
+      await Promise.all(db.tables.map((t) => t.clear()));
+      await db.meta.put({ key: 'deviceId', value: deviceId });
+      _resetDeviceIdCache();
+    };
+    const refOf = async () => ((await db.meta.get('ledgerRef'))?.value as { fileId: string; createdHere?: boolean });
+    const ids = (f: string) => (files.get(f)!.data as Ledger).suppliers.map((x) => x.id);
+
+    // phone B creates ledger1 (older); phone A creates ledger2 at the same moment.
+    await fresh('phoneB');
+    await put<Supplier>('suppliers', { id: 'B1', name: 'B' });
+    drive.writeJson.mockImplementationOnce(async (id, name, parent, data) => {
+      const r = await writeImpl(id, name, parent, data); // ledger1, created 1000
+      files.get('ledger1')!.hidden = true; // lag for this whole run: B's own new file is not listed
+      files.set('ledger2', { data: { ...empty(), suppliers: [{ id: 'A1', name: 'A', updatedAt: 1, deviceId: 'phoneA', deleted: false }] }, version: 1, parent: 'folder1', created: 1001 });
+      return r;
+    });
+    expect((await syncNow()).status).toBe('ok');
+    expect(await refOf()).toEqual({ folderId: 'folder1', fileId: 'ledger2', createdHere: true }); // B went the wrong way
+    files.get('ledger1')!.hidden = false;
+    const phoneB = await dump();
+
+    await fresh('phoneA');
+    await put<Supplier>('suppliers', { id: 'A1', name: 'A' });
+    // A's lookup and its pre-create re-check both saw nothing yet
+    drive.findFile.mockImplementationOnce(async () => null).mockImplementationOnce(async () => null);
+    drive.writeJson.mockImplementationOnce(async () => ({ id: 'ledger2', version: String(files.get('ledger2')!.version) })); // A's create = ledger2
+    files.get('ledger2')!.hidden = true; // lag for this whole run: A's own new file is not listed
+    expect((await syncNow()).status).toBe('ok');
+    expect(await refOf()).toEqual({ folderId: 'folder1', fileId: 'ledger1', createdHere: true });
+    files.get('ledger2')!.hidden = false;
+    const phoneA = await dump();
+    // crossed: A on ledger1, B on ledger2
+
+    // listings catch up; B syncs, then A adds a row and syncs, then B syncs again
+    await load(phoneB);
+    expect((await syncNow()).status).toBe('ok');
+    expect((await refOf()).fileId).toBe('ledger1');
+    const phoneB2 = await dump();
+    await load(phoneA);
+    await put<Supplier>('suppliers', { id: 'A2', name: 'A later' });
+    expect((await syncNow()).status).toBe('ok');
+    expect((await refOf()).fileId).toBe('ledger1');
+    await load(phoneB2);
+    expect((await syncNow()).status).toBe('ok');
+    expect((await refOf()).fileId).toBe('ledger1');
+    expect(ids('ledger1')).toEqual(['A1', 'A2', 'B1']);
+    expect((await db.suppliers.toArray()).map((x) => x.id)).toEqual(['A1', 'A2', 'B1']);
   });
 
   it('a ref that was not created here (joined / found) is not re-checked', async () => {

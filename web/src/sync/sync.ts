@@ -60,7 +60,8 @@ export async function setLedgerRef(ref: LedgerRef): Promise<void> {
 
 /**
  * The canonical ledger is the oldest ledger.json in the oldest "Restaurant Accounts" folder.
- * For a ledger this phone created, returns that canonical one if it is a different file
+ * For a ref marked createdHere (this phone created a ledger, or switched away from one it created),
+ * returns that canonical one if it is a different file
  * (another phone created theirs at the same time and it was not listed yet), else null.
  */
 async function olderLedger(ref: LedgerRef): Promise<LedgerRef | null> {
@@ -120,7 +121,8 @@ async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
     let ref = await resolveLedgerRef();
     if (ref.fileId && ref.createdHere) {
       const older = await olderLedger(ref);
-      if (older) { await setLedgerRef(older); ref = older; }
+      // keep createdHere: the re-check is read-only, and listing lag may still hide the true oldest
+      if (older) { ref = { ...older, createdHere: true }; await setLedgerRef(ref); }
     }
     const local = await readLocal();
     let remote: Ledger | null = null;
@@ -150,7 +152,9 @@ async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
         // we just created ledger.json: if another phone made one at the same time, the oldest wins
         const oldest = (await listFiles(LEDGER_NAME, ref.folderId, 2))[0];
         if (oldest && oldest.id !== w.id) {
-          await setLedgerRef({ folderId: ref.folderId, fileId: oldest.id });
+          // keep createdHere so later syncs re-check: with listing lag the other phone may have
+          // switched to OUR file, and only re-checking lets both settle on the true oldest
+          await setLedgerRef({ folderId: ref.folderId, fileId: oldest.id, createdHere: true });
           continue; // re-read theirs and merge our rows into it
         }
         ref = { ...ref, createdHere: true };
