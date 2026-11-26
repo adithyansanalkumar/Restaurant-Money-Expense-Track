@@ -82,3 +82,35 @@ test('export: a Drive failure is silent (the export itself still worked)', async
   expect(screen.queryByText(/Saved to Google Drive/)).toBeNull();
   expect(screen.queryByText('Export failed')).toBeNull();
 });
+
+test('By supplier: top 5 suppliers + Other, with amount and share of money out (I3)', async () => {
+  await db.entries.clear();
+  const names = ['Metro', 'Promocash', 'Boucherie', 'Primeur', 'Cave', 'Boulangerie', 'Poissonnier'];
+  const cents = [40000, 20000, 15000, 10000, 5000, 4000, 1000]; // + 5000 with no supplier = 100000
+  for (let i = 0; i < names.length; i++) {
+    await put('suppliers', { id: `s${i}`, name: names[i] } as any);
+    await put<Entry>('entries', { id: `x${i}`, kind: 'expense', date: '2026-11-10', amountIncl: cents[i], categoryId: 'cat-food', supplierId: `s${i}`, method: 'cash', createdBy: '' } as any);
+  }
+  await put<Entry>('entries', { id: 'nosup', kind: 'expense', date: '2026-11-10', amountIncl: 5000, categoryId: 'cat-food', method: 'cash', createdBy: '' } as any);
+  render(<Reports />);
+  const section = await screen.findByRole('region', { name: 'By supplier' });
+  await waitFor(() => expect(section.querySelectorAll('[data-testid="supplier-row"]')).toHaveLength(6));
+  const rows = [...section.querySelectorAll('[data-testid="supplier-row"]')].map((r) => norm(r.textContent));
+  expect(rows[0]).toBe(`Metro${fmt(40000)}40%`);
+  expect(rows[4]).toBe(`Cave${fmt(5000)}5%`);
+  expect(rows[5]).toBe(`Other${fmt(10000)}10%`); // 4000 + 1000 + 5000 without a supplier
+});
+
+test('a category named "Other" next to the remainder slice gives no duplicate React key (M8)', async () => {
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const cats = ['Other', 'B', 'C', 'D', 'E'];
+    for (let i = 0; i < cats.length; i++) {
+      await put('categories', { id: `k${i}`, kind: 'expense', name: cats[i], order: 10 + i } as any);
+      await put<Entry>('entries', { id: `k${i}`, kind: 'expense', date: '2026-11-11', amountIncl: 900000 - i * 1000, categoryId: `k${i}`, method: 'cash', createdBy: '' } as any);
+    }
+    render(<Reports />);
+    await waitFor(() => expect(screen.getAllByTestId('legend-row').map((r) => r.textContent).filter((x) => x?.startsWith('Other'))).toHaveLength(2));
+    expect(err.mock.calls.some((c) => String(c[0]).includes('same key'))).toBe(false);
+  } finally { err.mockRestore(); }
+});

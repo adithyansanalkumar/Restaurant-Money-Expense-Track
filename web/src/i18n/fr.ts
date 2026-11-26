@@ -120,6 +120,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'reports.to': 'Au',
   'reports.profit': 'Bénéfice · {range}',
   'reports.moneyOut': 'Sorties',
+  'reports.bySupplier': 'Par fournisseur',
   'reports.other': 'Autres',
   'reports.cashOut': 'Argent sorti',
   'reports.noSpending': 'Aucune dépense sur cette période',

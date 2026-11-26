@@ -118,6 +118,7 @@ export const en = {
   'reports.to': 'To',
   'reports.profit': 'Profit · {range}',
   'reports.moneyOut': 'Out',
+  'reports.bySupplier': 'By supplier',
   'reports.other': 'Other',
   'reports.cashOut': 'Cash paid out',
   'reports.noSpending': 'No spending in this range',

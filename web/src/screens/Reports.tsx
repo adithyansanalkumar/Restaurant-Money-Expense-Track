@@ -4,8 +4,8 @@ import { ProfitBars } from '../ui/charts/ProfitBars';
 import { Donut } from '../ui/charts/Donut';
 import { useMoney } from '../ui/useMoney';
 import { todayISO } from '../domain/clock';
-import { byCategory, cashOut, series, summarize } from '../domain/totals';
-import type { Category, Entry, ISODate, Payment } from '../domain/types';
+import { byCategory, bySupplier, cashOut, series, summarize } from '../domain/totals';
+import type { Category, Entry, ISODate, Payment, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
 import { t, useLanguage } from '../i18n';
 import { exportExcel, exportFilename } from '../export/workbook';
@@ -39,6 +39,7 @@ export function Reports() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const { revision } = useSyncStatus();
@@ -46,8 +47,8 @@ export function Reports() {
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [e, p, c] = await Promise.all([listLive<Entry>('entries'), listLive<Payment>('payments'), listLive<Category>('categories')]);
-      if (live) { setEntries(e); setPayments(p); setCategories(c); }
+      const [e, p, c, s] = await Promise.all([listLive<Entry>('entries'), listLive<Payment>('payments'), listLive<Category>('categories'), listLive<Supplier>('suppliers')]);
+      if (live) { setEntries(e); setPayments(p); setCategories(c); setSuppliers(s); }
     })();
     return () => { live = false; };
   }, [revision]); // revision: a sync changed rows
@@ -63,11 +64,20 @@ export function Reports() {
   const slices = useMemo(() => {
     const cats = byCategory(entries, range.from, range.to, view);
     const name = (id: string) => categories.find((c) => c.id === id)?.name ?? '';
-    const top = cats.slice(0, 4).map((c, i) => ({ label: name(c.categoryId), cents: c.cents, color: COLORS[i] }));
+    const top = cats.slice(0, 4).map((c, i) => ({ key: c.categoryId, label: name(c.categoryId), cents: c.cents, color: COLORS[i] }));
     const rest = cats.slice(4).reduce((s, c) => s + c.cents, 0);
-    if (rest > 0) top.push({ label: t('reports.other'), cents: rest, color: COLORS[4] });
+    if (rest > 0) top.push({ key: ' other', label: t('reports.other'), cents: rest, color: COLORS[4] });
     return top;
   }, [entries, categories, range.from, range.to, view, lang]);
+  // top 5 suppliers, then "Other" (the rest, and spending with no supplier), as a share of money out
+  const supplierRows = useMemo(() => {
+    const rows = bySupplier(entries, range.from, range.to, view);
+    const name = (id: string) => suppliers.find((s) => s.id === id)?.name ?? '';
+    const top = rows.slice(0, 5).map((r) => ({ key: r.supplierId, label: name(r.supplierId), cents: r.cents }));
+    const shown = top.reduce((s, r) => s + r.cents, 0);
+    if (sum.out - shown > 0) top.push({ key: ' other', label: t('reports.other'), cents: sum.out - shown });
+    return top;
+  }, [entries, suppliers, range.from, range.to, view, sum.out, lang]);
 
   const monthFmt = (iso: string, opts: Intl.DateTimeFormatOptions) => {
     const [y, m] = iso.split('-').map(Number);
@@ -145,7 +155,7 @@ export function Reports() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12 }}>
           {slices.length === 0 && <span style={{ color: '#A9BED0' }}>{t('reports.noSpending')}</span>}
           {slices.map((s) => (
-            <div key={s.label} data-testid="legend-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div key={s.key} data-testid="legend-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: 3, background: s.color }} />
               <span style={{ flex: 1 }}>{s.label}</span>
               <span style={{ fontWeight: 700 }}>{Math.round((s.cents / totalSlices) * 100)}%</span>
@@ -153,6 +163,19 @@ export function Reports() {
           ))}
         </div>
       </Glass>
+
+      {supplierRows.length > 0 && (
+        <Glass as="section" aria-label={t('reports.bySupplier')} style={{ borderRadius: 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: '#C6D8E6' }}>{t('reports.bySupplier')}</h2>
+          {supplierRows.map((r) => (
+            <div key={r.key} data-testid="supplier-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 28 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span>
+              <span style={{ fontWeight: 600 }}>{fmt(r.cents)}</span>
+              <span style={{ width: 40, textAlign: 'right', fontWeight: 700, color: '#C6D8E6' }}>{sum.out ? Math.round((r.cents / sum.out) * 100) : 0}%</span>
+            </div>
+          ))}
+        </Glass>
+      )}
 
       <Glass style={{ borderRadius: 22, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: '#C6D8E6' }}>{t('reports.cashOut')}</span>
