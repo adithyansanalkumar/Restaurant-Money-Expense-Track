@@ -231,3 +231,23 @@ test('edit credit -> paid replaces its payments with one paid-now payment', asyn
   expect(l).toHaveLength(1);
   expect(l[0].amount).toBe(8000);
 });
+
+test('editing with a changed amount drops stale amountExcl/tax; unchanged keeps them', async () => {
+  const e = await mkEntry({ amountExcl: 7000, tax: 1000 });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect(await db.entries.get(e.id)).toMatchObject({ amountExcl: 7000, tax: 1000 });
+
+  const go2 = vi.fn();
+  render(<AddEntry onGo={go2} initial={e} />);
+  fireEvent.click((await screen.findAllByRole('button', { name: '5' })).at(-1)!);
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Save expense' })).at(-1)!);
+  await waitFor(() => expect(go2).toHaveBeenCalledWith('home'));
+  const saved = (await db.entries.get(e.id))!;
+  expect(saved.amountIncl).not.toBe(8000);
+  expect(saved.amountExcl).toBeUndefined();
+  expect(saved.tax).toBeUndefined();
+});

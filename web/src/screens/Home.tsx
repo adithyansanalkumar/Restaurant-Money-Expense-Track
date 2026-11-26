@@ -117,6 +117,11 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
             <span style={{ display: 'flex', gap: 6, color: '#DCE8F1' }}><span style={{ color: OUT, fontWeight: 700 }}>↑ {t('home.out')}</span><span>{fmt(sum.out)}</span></span>
           </div>
         </div>
+        {sum.fallbackCount > 0 && (
+          <div style={{ fontSize: 12, color: '#C6D8E6' }}>
+            {sum.fallbackCount === 1 ? t('home.fallbackNoteOne') : t('home.fallbackNote', { n: sum.fallbackCount })}
+          </div>
+        )}
         <InOutLine data={data} />
       </Glass>
 
@@ -156,7 +161,7 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
         {recent.map((e, i) => {
           const income = e.kind === 'income';
           const name = income ? (e.channel || catName(e.categoryId) || t('history.collection')) : (supplierName(e.supplierId) ?? catName(e.categoryId) ?? '');
-          const cents = shownAmount(e, view).cents;
+          const { cents, fallback } = shownAmount(e, view);
           return (
             <div key={e.id} data-testid="recent-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderTop: i ? '1px solid rgba(255,255,255,0.12)' : undefined }}>
               <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 12, background: income ? 'rgba(111,227,160,0.2)' : 'rgba(255,142,142,0.2)', color: income ? IN : '#FFB4B4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>{initials(name)}</span>
@@ -164,7 +169,10 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
                 <span style={{ fontSize: 14, fontWeight: 600 }}>{name}</span>
                 <span style={{ fontSize: 12, color: '#A9BED0' }}>{[income ? undefined : catName(e.categoryId), e.date].filter(Boolean).join(' · ')}</span>
               </span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: income ? IN : OUT }}>{income ? fmt(cents, { sign: true }) : fmt(-cents)}</span>
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: income ? IN : OUT }}>{income ? fmt(cents, { sign: true }) : fmt(-cents)}</span>
+                {fallback && <span data-testid="incl-tag" style={{ fontSize: 11, color: '#A9BED0' }}>{t('tax.inclTag')}</span>}
+              </span>
             </div>
           );
         })}

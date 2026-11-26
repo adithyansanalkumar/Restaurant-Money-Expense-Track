@@ -18,7 +18,9 @@ export function App() {
   const needsSetup = loaded && !shared;
 
   useEffect(() => {
-    if (!loaded) return;
+    useEffect(() => { if (route !== 'add') setEditing(null); }, [route]);
+
+  if (!loaded) return;
     if (needsSetup && route !== 'setup' && route !== 'join') go('setup');
     else if (!needsSetup && route === 'setup') go('home');
   }, [loaded, needsSetup, route, go]);

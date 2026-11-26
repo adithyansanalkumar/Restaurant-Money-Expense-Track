@@ -102,4 +102,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'history.cancel': 'Annuler',
   'history.edit': "Modifier l'écriture",
   'history.collection': 'Encaissement',
+  'tax.inclTag': 'TTC',
+  'home.fallbackNote': '{n} montants incluent la taxe',
+  'home.fallbackNoteOne': '1 montant inclut la taxe',
 };

@@ -156,8 +156,8 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
           ...(initial?.id ? { id: initial.id } : {}),
           ...(noteText ? { note: noteText } : {}),
           ...(initial?.photoId ? { photoId: initial.photoId } : {}),
-          ...(initial?.amountExcl !== undefined ? { amountExcl: initial.amountExcl } : {}),
-          ...(initial?.tax !== undefined ? { tax: initial.tax } : {}),
+          ...(initial?.amountExcl !== undefined && cents === initial.amountIncl ? { amountExcl: initial.amountExcl } : {}),
+          ...(initial?.tax !== undefined && cents === initial.amountIncl ? { tax: initial.tax } : {}),
         };
         const orig = initial?.id ? await db.entries.get(initial.id) : undefined; // before overwrite
         const entry = kind === 'expense'

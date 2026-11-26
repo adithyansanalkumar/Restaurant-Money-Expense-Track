@@ -83,3 +83,11 @@ test('See all routes to history; recent shows at most 5; sync button renders', a
   fireEvent.click(screen.getByRole('button', { name: 'See all' }));
   expect(go).toHaveBeenCalledWith('history');
 });
+
+test('excl view: entries lacking amountExcl are marked and Home notes the count', async () => {
+  await saveShared({ taxView: 'excl' });
+  await seed(novemberEntries, novemberPayments);
+  render(<Home onGo={vi.fn()} />);
+  expect(await screen.findByText('1 amount includes tax')).toBeTruthy();
+  expect(screen.getAllByTestId('incl-tag').length).toBeGreaterThan(0);
+});

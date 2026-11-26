@@ -68,7 +68,7 @@ export function History({ onGo }: { onGo: (r: Route) => void }) {
         {rows.length === 0 && <div style={{ fontSize: 13, color: '#A9BED0', padding: '14px 0' }}>{t('history.empty')}</div>}
         {rows.map((e, i) => {
           const income = e.kind === 'income';
-          const cents = shownAmount(e, view).cents;
+          const { cents, fallback } = shownAmount(e, view);
           return (
             <div key={e.id} data-testid="history-row" style={{ display: 'flex', alignItems: 'center', gap: 4, borderTop: i ? '1px solid rgba(255,255,255,0.12)' : undefined }}>
               <button type="button" aria-label={`${t('history.edit')}: ${title(e)}`} onClick={() => edit(e)} style={{
@@ -78,7 +78,10 @@ export function History({ onGo }: { onGo: (r: Route) => void }) {
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{title(e)}</span>
                   <span style={{ fontSize: 12, color: '#A9BED0' }}>{[e.date, e.note].filter(Boolean).join(' · ')}</span>
                 </span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: income ? IN : OUT }}>{income ? fmt(cents, { sign: true }) : fmt(-cents)}</span>
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: income ? IN : OUT }}>{income ? fmt(cents, { sign: true }) : fmt(-cents)}</span>
+                  {fallback && <span data-testid="incl-tag" style={{ fontSize: 11, color: '#A9BED0' }}>{t('tax.inclTag')}</span>}
+                </span>
               </button>
               <button type="button" aria-label={t('history.delete')} onClick={() => setPending(e)} style={{ width: 44, height: 44, border: 0, background: 'transparent', color: '#C6D8E6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>

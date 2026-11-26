@@ -100,4 +100,7 @@ export const en = {
   'history.cancel': 'Cancel',
   'history.edit': 'Edit entry',
   'history.collection': 'Collection',
+  'tax.inclTag': 'incl. tax',
+  'home.fallbackNote': '{n} amounts include tax',
+  'home.fallbackNoteOne': '1 amount includes tax',
 } as const;

@@ -71,3 +71,14 @@ test('tapping a row opens the entry for editing', async () => {
   expect(getEditing()?.id).toBe('e1');
   expect(go).toHaveBeenCalledWith('add');
 });
+
+test('excl view marks only rows that fell back to the incl amount', async () => {
+  await saveShared({ taxView: 'excl' });
+  await put<Supplier>('suppliers', { id: 's1', name: 'Metro' });
+  await put<Entry>('entries', entry('a', { supplierId: 's1', amountExcl: 9000 }));
+  await put<Entry>('entries', entry('b', { supplierId: 's1', date: '2026-11-01' }));
+  render(<History onGo={vi.fn()} />);
+  await screen.findAllByText('Metro');
+  expect(screen.getAllByTestId('incl-tag')).toHaveLength(1);
+  expect(within(screen.getAllByTestId('history-row')[1]).getByTestId('incl-tag')).toBeTruthy();
+});
