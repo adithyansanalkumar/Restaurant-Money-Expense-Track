@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { db } from '../db/db';
 import { setLanguage } from '../i18n';
@@ -13,7 +13,7 @@ vi.mock('../sync/auth', async (orig) => ({
   signOut: () => auth.signOut(),
 }));
 const openShared = vi.hoisted(() => vi.fn());
-vi.mock('../sync/share', async (orig) => ({ ...(await orig<typeof import('../sync/share')>()), openShared: () => openShared() }));
+vi.mock('../sync/share', async (orig) => ({ ...(await orig<typeof import('../sync/share')>()), openShared: (...a: unknown[]) => openShared(...a) }));
 
 import { Join } from './Join';
 import { PickerCancelled } from '../sync/share';
@@ -91,4 +91,49 @@ test('a phone holding another account\'s restaurant (no ledger chosen) says so: 
   await db.meta.put({ key: 'adoptPending', value: true });
   render(<Join onGo={vi.fn()} />);
   expect(await screen.findByText('This phone belongs to dad@x.com’s restaurant — open it again')).toBeTruthy();
+});
+
+describe('a phone that already has entries (I2)', () => {
+  const entries = async (n: number) => {
+    for (let i = 0; i < n; i++) await db.entries.put({ id: `e${i}`, updatedAt: 1, deviceId: 'me', deleted: false, kind: 'expense', date: '2026-11-01', amountIncl: 100, categoryId: 'c', method: 'cash', createdBy: '' } as any);
+  };
+  const ask = 'This phone has 2 entries. Add them to the shared restaurant, or erase them first?';
+  test('asks first; "Add them" joins keeping them', async () => {
+    auth.email = 'son@x.com';
+    await entries(2);
+    const go = vi.fn();
+    render(<Join onGo={go} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose the shared ledger' }));
+    expect(await screen.findByText(ask)).toBeTruthy();
+    expect(openShared).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Add them' }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect(openShared).toHaveBeenCalledWith('file', { eraseLocal: false });
+  });
+  test('"Erase them first" joins with eraseLocal', async () => {
+    auth.email = 'son@x.com';
+    await entries(2);
+    const go = vi.fn();
+    render(<Join onGo={go} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose the shared ledger' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Erase them first' }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect(openShared).toHaveBeenCalledWith('file', { eraseLocal: true });
+  });
+  test('Cancel does nothing', async () => {
+    auth.email = 'son@x.com';
+    await entries(2);
+    render(<Join onGo={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose the shared ledger' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText(ask)).toBeNull());
+    expect(openShared).not.toHaveBeenCalled();
+  });
+  test('no entries: no question', async () => {
+    auth.email = 'son@x.com';
+    const go = vi.fn();
+    render(<Join onGo={go} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose the shared ledger' }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  });
 });

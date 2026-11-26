@@ -7,11 +7,11 @@ import { useSignIn } from '../ui/useSignIn';
 import { SignInPrompts } from '../ui/ConsentNotice';
 import { currentEmail, signOut } from '../sync/auth';
 import { isAdoptPending } from '../sync/sync';
-import { JOIN_MODE, openShared } from '../sync/share';
+import { JOIN_MODE, countLocalEntries, openShared } from '../sync/share';
 import { otherOwner } from '../sync/onboard';
 import { db } from '../db/db';
 import { useSettings } from '../settings/store';
-import { errorText, iconTile, linkBtn, mutedText, noticeText, screenCol, screenTitle } from '../ui/styles';
+import { errorText, iconTile, linkBtn, mutedText, noticeText, screenCol, screenTitle, secondaryBtn } from '../ui/styles';
 
 const isNamed = (e: unknown, name: string) => (e as Error | undefined)?.name === name;
 
@@ -53,12 +53,22 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
     onGo('setup');
   };
 
+  // the phone already has entries: add them to the shared restaurant, or erase them first?
+  const [ask, setAsk] = useState<number | null>(null);
   const choose = async () => {
     if (working) return;
     setError(null);
+    const n = await countLocalEntries().catch(() => 0);
+    if (n > 0) { setAsk(n); return; }
+    await join(false);
+  };
+  const join = async (eraseLocal: boolean) => {
+    if (working) return;
+    setAsk(null);
+    setError(null);
     setWorking(true);
     try {
-      await openShared();
+      await openShared(JOIN_MODE, { eraseLocal });
       await saveDevice({ appLanguage: device.appLanguage });
       onGo('home');
     } catch (e) {
@@ -84,11 +94,19 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
         {email
           ? <>
               <div style={mutedText}>{t('auth.signedInAs', { email })}</div>
-              <button type="button" style={primaryBtn} disabled={working} onClick={() => void choose()}>
+              <button type="button" style={primaryBtn} disabled={working || ask !== null} onClick={() => void choose()}>
                 {JOIN_MODE === 'folder' ? t('join.pickFolder') : t('join.pickFile')}
               </button>
             </>
           : <button type="button" style={primaryBtn} disabled={signingIn} onClick={() => void doSignIn()}>{t('auth.signIn')}</button>}
+        {ask !== null && (
+          <div role="alertdialog" aria-label={t('join.title')} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={noticeText}>{ask === 1 ? t('join.hasOneEntry') : t('join.hasEntries', { n: ask })}</div>
+            <button type="button" style={primaryBtn} onClick={() => void join(false)}>{t('join.addThem')}</button>
+            <button type="button" style={{ ...secondaryBtn, borderColor: 'rgba(255,142,142,0.6)', color: '#FF8E8E' }} onClick={() => void join(true)}>{t('join.eraseFirst')}</button>
+            <button type="button" style={secondaryBtn} onClick={() => setAsk(null)}>{t('settings.cancel')}</button>
+          </div>
+        )}
         {!email && <SignInPrompts s={s} onContinue={() => void doSignIn()} onReset={() => void doSignIn(true)} />}
         {working && <div role="status" style={noticeText}>{t('join.working')}</div>}
         {error && <div role="alert" style={errorText}>{error}</div>}

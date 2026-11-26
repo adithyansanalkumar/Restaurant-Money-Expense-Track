@@ -2,7 +2,7 @@ import { db } from '../db/db';
 import { reloadSettings, saveShared } from '../settings/store';
 import { Offline, currentEmail, getAccessToken } from './auth';
 import { ensureFolder, findFile, shareFile, shareFolder, type Id } from './drive';
-import { FOLDER_NAME, LEDGER_NAME, clearAdoptPending, dropLocalShared, resetLedgerState, restoreLocalShared, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
+import { FOLDER_NAME, LEDGER_NAME, clearAdoptPending, dropLocalShared, eraseLocalBooks, resetLedgerState, restoreLocalShared, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
 
 /**
  * How Join picks the shared ledger: 'file' = pick ledger.json itself; 'folder' = pick the shared
@@ -160,14 +160,20 @@ async function pick(mode: 'file' | 'folder', token: string): Promise<string> {
   });
 }
 
+/** Live (not deleted) entries on this phone: Join asks what to do with them first. */
+export async function countLocalEntries(): Promise<number> {
+  return db.entries.filter((e) => !e.deleted).count();
+}
+
 /**
  * Join: pick the shared ledger (JOIN_MODE), store it as a joined ref (dropping the old ref and
  * last-sync), then sync it down. Never writes shared settings: they come from the ledger. A local
  * shared row (phone used signed out) is removed raw first; other local rows merge in. If the sync
  * fails, or the ledger has no restaurant, that row is put back and the joined ref dropped.
- * Clears adoptPending on success. Throws PickerCancelled, NoLedger, NoRestaurant or JoinSyncFailed.
+ * eraseLocal: the phone's own books are erased first (Join asked). Clears adoptPending on success.
+ * Throws PickerCancelled, NoLedger, NoRestaurant or JoinSyncFailed.
  */
-export async function openShared(mode: 'file' | 'folder' = JOIN_MODE): Promise<void> {
+export async function openShared(mode: 'file' | 'folder' = JOIN_MODE, opts: { eraseLocal?: boolean } = {}): Promise<void> {
   const token = await getAccessToken();
   const id = await pick(mode, token);
   let ref: LedgerRef;
@@ -178,6 +184,8 @@ export async function openShared(mode: 'file' | 'folder' = JOIN_MODE): Promise<v
   } else {
     ref = { fileId: id, joined: true };
   }
+  // "erase them first": only once a ledger was picked, raw (no tombstones), still signed in
+  if (opts.eraseLocal) await eraseLocalBooks();
   await resetLedgerState(); // bumps the generation: nothing earlier may write from here on
   const dropped = await dropLocalShared(); // before the ref exists, so no sync can push it
   await setLedgerRef(ref);

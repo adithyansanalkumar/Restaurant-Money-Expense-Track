@@ -357,18 +357,32 @@ export async function checkBeforeReset(timeoutMs = 10_000): Promise<boolean> {
 export async function resetPhone(): Promise<void> {
   resetTimers();
   await signOut();
+  await clearBooks(['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth', 'lastJoinedRef']);
+}
+
+/** Erases the synced tables and photos RAW (no hooks, no tombstones), and these meta keys. */
+async function clearBooks(metaKeys: string[]): Promise<void> {
   const tables = [...LEDGER_TABLES.map(tbl), db.photos, db.meta];
   await db.transaction('rw', tables, async (tx) => {
     applyingTx = tx;
     try {
       for (const t of LEDGER_TABLES) await tbl(t).clear();
       await db.photos.clear();
-      await db.meta.bulkDelete(['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth', 'lastJoinedRef']);
+      if (metaKeys.length) await db.meta.bulkDelete(metaKeys);
     } finally {
       applyingTx = null;
     }
   });
   setState({ revision: state.revision + 1 });
+}
+
+/**
+ * Join "erase them first": the same raw erase as resetPhone (nothing reaches any ledger as a
+ * tombstone) but still signed in. Forgets the old ledger ref; the caller picks the new one.
+ */
+export async function eraseLocalBooks(): Promise<void> {
+  resetTimers();
+  await clearBooks(['ledgerRef', 'lastSync', 'lastJoinedRef']);
 }
 
 // ---------------- scheduling ----------------

@@ -236,6 +236,50 @@ describe('joining from a phone that was used signed out ("Not now")', () => {
   });
 });
 
+describe('joining with entries already on the phone (I2)', () => {
+  const localBooks = async () => {
+    await saveShared({ restaurantName: 'Test resto', country: 'FR', currency: 'EUR' });
+    await db.entries.put({ id: 'test1', updatedAt: 50, deviceId: 'me', deleted: false, kind: 'expense', date: '2026-11-01', amountIncl: 700, categoryId: 'c', method: 'cash', createdBy: '' } as any);
+    await db.suppliers.put({ id: 'sup1', updatedAt: 50, deviceId: 'me', deleted: false, name: 'Test shop' } as any);
+    await db.photos.put({ id: 'ph1', blob: new Blob(['x']), createdAt: 1, backedUp: false });
+    await db.meta.put({ key: 'auth', value: { session: 'S', email: 'adi@x.com' } });
+  };
+  it('countLocalEntries counts live entries only', async () => {
+    const { countLocalEntries } = await import('./share');
+    await localBooks();
+    await db.entries.put({ id: 'gone', updatedAt: 51, deviceId: 'me', deleted: true } as any);
+    expect(await countLocalEntries()).toBe(1);
+  });
+  it('erase first: the local books are cleared raw (no tombstones reach the shared ledger), still signed in', async () => {
+    await localBooks();
+    files.set('sharedLedger', { data: owned, version: 7 });
+    await openShared('file', { eraseLocal: true });
+    const pushed = files.get('sharedLedger')!.data as Ledger;
+    expect(pushed.entries).toEqual([]);
+    expect(pushed.suppliers).toEqual([]);
+    expect(await db.entries.count()).toBe(0);
+    expect(await db.photos.count()).toBe(0);
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Chez Dad' });
+    expect(await db.meta.get('auth')).toBeDefined();
+  });
+  it('add them: local entries merge into the shared ledger', async () => {
+    await localBooks();
+    files.set('sharedLedger', { data: owned, version: 7 });
+    await openShared('file');
+    const pushed = files.get('sharedLedger')!.data as Ledger;
+    expect(pushed.entries.map((e) => e.id)).toEqual(['test1']);
+    expect(await db.photos.count()).toBe(1);
+  });
+  it('erase first, but the picker is cancelled: nothing is erased', async () => {
+    await localBooks();
+    picked = 'cancel';
+    try {
+      await expect(openShared('file', { eraseLocal: true })).rejects.toBeInstanceOf(PickerCancelled);
+    } finally { picked = { id: 'sharedLedger' }; }
+    expect(await db.entries.count()).toBe(1);
+  });
+});
+
 describe('openShared rollbacks and adoptPending', () => {
   it('a ledger without a restaurant: NoRestaurant, no joined ref left, local row restored', async () => {
     await saveShared({ restaurantName: 'Mine' });
