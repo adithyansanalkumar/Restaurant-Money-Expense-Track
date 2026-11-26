@@ -21,13 +21,13 @@ const IN = '#6FE3A0';
 const OUT = '#FF8E8E';
 
 
-function formatTyped(cents: number, sep: ',' | '.'): string {
+export function formatTyped(cents: number, sep: ',' | '.'): string {
   const whole = Math.floor(cents / 100);
   const frac = cents % 100;
   return frac === 0 ? String(whole) : `${whole}${sep}${String(frac).padStart(2, '0')}`;
 }
 
-function currencyParts(currency: string, locale: string): { symbol: string; before: boolean; sep: ',' | '.' } {
+export function currencyParts(currency: string, locale: string): { symbol: string; before: boolean; sep: ',' | '.' } {
   try {
     const parts = new Intl.NumberFormat(locale, { style: 'currency', currency }).formatToParts(1234.5);
     const symbol = parts.find((p) => p.type === 'currency')?.value ?? currency;
@@ -39,7 +39,7 @@ function currencyParts(currency: string, locale: string): { symbol: string; befo
   }
 }
 
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+export const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 
 const rowLabel: CSSProperties = { color: '#C6D8E6' };
 const row: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14, gap: 10, minHeight: 44 };
