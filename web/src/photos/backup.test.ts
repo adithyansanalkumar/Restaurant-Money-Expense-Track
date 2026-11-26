@@ -93,3 +93,27 @@ describe('backupPendingPhotos', () => {
     expect(a + b).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe('setting changes during a run', () => {
+  it('turning it on while a run (that saw it off) is in flight still backs up afterwards', async () => {
+    await saveShared({ photoBackup: false });
+    await photo('p1', 1);
+    const first = backupPendingPhotos(); // reads the setting as off
+    await saveShared({ photoBackup: true });
+    const second = backupPendingPhotos(); // swallowed by the in-flight run: must trigger a rerun
+    await Promise.all([first, second]);
+    expect(drive.uploadBlob).toHaveBeenCalledTimes(1);
+    expect((await db.photos.get('p1'))!.backedUp).toBe(true);
+  });
+
+  it('switching it off mid-run stops uploading the remaining photos', async () => {
+    await photo('p1', 1); await photo('p2', 2); await photo('p3', 3);
+    drive.uploadBlob.mockImplementationOnce(async () => {
+      await saveShared({ photoBackup: false });
+      return { id: 'x', version: '1' };
+    });
+    await backupPendingPhotos();
+    expect(drive.uploadBlob).toHaveBeenCalledTimes(1);
+    expect((await db.photos.toArray()).filter((p) => !p.backedUp)).toHaveLength(2);
+  });
+});

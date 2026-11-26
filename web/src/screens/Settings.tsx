@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { db } from '../db/db';
 import { Glass } from '../ui/Glass';
 import { Segmented } from '../ui/Segmented';
 import { SyncStatus } from '../ui/SyncStatus';
@@ -52,6 +53,18 @@ function Switch({ on, label: text, hint: sub, disabled, onChange }: { on: boolea
   );
 }
 
+function NameInput({ value, disabled, onSave }: { value: string; disabled: boolean; onSave: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const commit = () => { const n = v.trim(); if (!n) setV(value); else if (n !== value) onSave(n); };
+  return (
+    <input className="field" aria-label={t('setup.name')} value={v} disabled={disabled}
+      onChange={(e) => setV(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      style={{ height: 46, borderRadius: 14, padding: '0 14px', font: '800 18px Inter, sans-serif', color: '#FFFFFF' }} />
+  );
+}
+
 export function Settings({ onGo }: { onGo: (r: Route) => void }) {
   useLanguage();
   const { shared, device, saveShared, saveDevice } = useSettings();
@@ -60,13 +73,14 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
   const [email, setEmail] = useState<string | null>(null);
   const [owner, setOwner] = useState(false);
   const [pending, setPending] = useState(false);
+  const [hasRef, setHasRef] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [adopting, setAdopting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [e, o, p] = await Promise.all([currentEmail(), isOwner(), isAdoptPending()]);
-      setEmail(e); setOwner(o); setPending(p);
+      const [e, o, p, r] = await Promise.all([currentEmail(), isOwner(), isAdoptPending(), db.meta.get('ledgerRef')]);
+      setEmail(e); setOwner(o); setPending(p); setHasRef(!!r);
     } catch { /* keep what is shown */ }
   }, []);
   useEffect(() => { void refresh(); }, [refresh, shared, status, revision]);
@@ -149,6 +163,8 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
   };
   const removePin = async () => { await clearPin(); setPinMode('idle'); setBio(false); await loadLock(); };
 
+  // owner, or a purely local restaurant (signed out, no ledger yet)
+  const canEditRegion = owner || (!email && !hasRef);
   const roleText = !email ? t('settings.localOnly') : owner ? t('settings.owner') : t('settings.sharedRole');
   const sharedWith = shared?.sharedWith ?? [];
 
@@ -157,7 +173,9 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
       <h1 style={{ margin: 0, fontFamily: "'Inter Tight', sans-serif", fontSize: 28, fontWeight: 800, color: '#FFFFFF' }}>{t('settings.title')}</h1>
 
       <Card title={t('settings.restaurant')}>
-        <div style={{ fontSize: 20, fontWeight: 800 }}>{shared?.restaurantName}</div>
+        {shared && canEditRegion
+          ? <NameInput value={shared.restaurantName} disabled={pending} onSave={(n) => void save({ restaurantName: n })} />
+          : <div style={{ fontSize: 20, fontWeight: 800 }}>{shared?.restaurantName}</div>}
         <div style={{ ...hint, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           {email && <span>{email}</span>}
           <span style={{ padding: '2px 10px', borderRadius: 12, background: 'rgba(255,255,255,0.14)', fontWeight: 700, color: '#FFFFFF' }}>{roleText}</span>
@@ -176,7 +194,7 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
 
       {shared && (
         <Card title={t('settings.region')}>
-          {owner ? (
+          {canEditRegion ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
               <div style={col}>
                 <label htmlFor="st-country" style={label}>{t('setup.country')}</label>

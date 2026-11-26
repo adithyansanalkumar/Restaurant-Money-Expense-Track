@@ -52,7 +52,7 @@ const shared = async () => (await db.settings.get('shared'))!;
 
 test('restaurant card: name, signed-in email, Owner role, and Sync now', async () => {
   render(<Settings onGo={vi.fn()} />);
-  expect(await screen.findByText('Chez Adi')).toBeTruthy();
+  expect(await screen.findByDisplayValue('Chez Adi')).toBeTruthy();
   expect((await screen.findAllByText(/adi@x\.com/)).length).toBeGreaterThan(0);
   expect(screen.getByText('Owner')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
@@ -251,4 +251,39 @@ test('signed out: Sign in with Google runs signInLater (adoption decides)', asyn
   fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
   await waitFor(() => expect(adopt).toHaveBeenCalled());
   expect(await screen.findByText('Share with someone')).toBeTruthy();
+});
+
+test('owner can rename the restaurant (shared setting); a non-owner sees it read-only', async () => {
+  const { unmount } = render(<Settings onGo={vi.fn()} />);
+  const input = await screen.findByLabelText('Restaurant name');
+  fireEvent.change(input, { target: { value: 'Chez Dad' } });
+  fireEvent.blur(input);
+  await waitFor(async () => expect((await shared()).restaurantName).toBe('Chez Dad'));
+  unmount();
+  auth.email = 'son@x.com';
+  render(<Settings onGo={vi.fn()} />);
+  await screen.findByText('Chez Dad');
+  expect(screen.queryByLabelText('Restaurant name')).toBeNull();
+});
+
+test('name is not editable while adoptPending', async () => {
+  await db.meta.put({ key: 'adoptPending', value: true });
+  render(<Settings onGo={vi.fn()} />);
+  expect((await screen.findByLabelText('Restaurant name') as HTMLInputElement).disabled).toBe(true);
+});
+
+test('a purely local phone (signed out, no ledgerRef) can edit name and region even with an ownerEmail stored', async () => {
+  auth.email = null;
+  await db.meta.delete('ledgerRef');
+  render(<Settings onGo={vi.fn()} />);
+  expect(await screen.findByLabelText('Restaurant name')).toBeTruthy();
+  expect(screen.getByLabelText('Country')).toBeTruthy();
+});
+
+test('signed out but with a ledgerRef and another owner: read-only', async () => {
+  auth.email = null; // ownerEmail adi@x.com is set, a ledger exists: not purely local
+  render(<Settings onGo={vi.fn()} />);
+  await screen.findByText('Chez Adi');
+  expect(screen.queryByLabelText('Restaurant name')).toBeNull();
+  expect(screen.queryByLabelText('Country')).toBeNull();
 });
