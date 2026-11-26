@@ -15,7 +15,7 @@ function when(at: number, lang: string): string {
 /** Small sync status line: synced <time> / syncing… / offline / sign in to sync (button) / sync error. */
 export function SyncStatus({ style }: { style?: React.CSSProperties }) {
   const lang = useLanguage();
-  const { status, at, running } = useSyncStatus();
+  const { status, at, running, code } = useSyncStatus();
   // signInLater: syncs the chosen ledger, or adopts this account's one first when none is chosen
   const s = useSignInLater();
   const [failed, setFailed] = useState(false);
@@ -66,6 +66,7 @@ export function SyncStatus({ style }: { style?: React.CSSProperties }) {
   }
   if (status === 'ok' && at) return <div role="status" style={base}>{t('sync.synced', { time: when(at, lang) })}</div>;
   if (status === 'offline') return <div role="status" style={base}>{t('sync.offline')}</div>;
+  if (status === 'error' && code === 'sharedGone') return <div role="alert" style={{ ...base, color: '#FFB4B4' }}>{t('sync.sharedGone')}</div>;
   if (status === 'error') return <div role="status" style={{ ...base, color: '#FFB4B4' }}>{t('sync.error')}</div>;
   return null;
 }

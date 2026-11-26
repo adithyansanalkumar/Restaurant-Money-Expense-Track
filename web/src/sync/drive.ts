@@ -6,6 +6,11 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 export type Id = string;
 
+/** The file is gone (404), or in the Drive trash. */
+export class NotFound extends Error {
+  constructor(message = 'Drive file not found') { super(message); this.name = 'NotFound'; }
+}
+
 async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const send = async (force: boolean) => {
     const token = await getAccessToken(force);
@@ -19,6 +24,7 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
   };
   let res = await send(false);
   if (res.status === 401) res = await send(true);
+  if (res.status === 404) throw new NotFound(`Drive request failed (404)`);
   if (!res.ok) throw new Error(`Drive request failed (${res.status})`);
   return res;
 }
@@ -78,8 +84,10 @@ export async function getVersion(id: Id): Promise<string> {
   return meta.version;
 }
 
+/** Throws NotFound when the file is gone or in the trash (it must not be read or written then). */
 export async function readJson(id: Id): Promise<{ data: unknown; version: string }> {
-  const meta = await (await driveFetch(`${API}/files/${encodeURIComponent(id)}?fields=version`)).json();
+  const meta = await (await driveFetch(`${API}/files/${encodeURIComponent(id)}?fields=version,trashed`)).json();
+  if (meta.trashed) throw new NotFound('Drive file is in the trash');
   const data = await (await driveFetch(`${API}/files/${encodeURIComponent(id)}?alt=media`)).json();
   return { data, version: meta.version };
 }

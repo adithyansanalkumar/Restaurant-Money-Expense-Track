@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const getAccessToken = vi.fn();
 vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: (force?: boolean) => getAccessToken(force) }));
 
-import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, shareFile, getVersion, downloadByName } from './drive';
+import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, shareFile, getVersion, downloadByName, NotFound } from './drive';
 import { Offline } from './auth';
 
 const fetchMock = vi.fn();
@@ -112,7 +112,7 @@ describe('readJson / uploadBlob / shareFolder', () => {
   it('reads metadata version and media', async () => {
     fetchMock.mockResolvedValueOnce(json({ version: '9' })).mockResolvedValueOnce(json({ hello: 'w' }));
     expect(await readJson('id1')).toEqual({ data: { hello: 'w' }, version: '9' });
-    expect(fetchMock.mock.calls[0][0]).toContain('/drive/v3/files/id1?fields=version');
+    expect(fetchMock.mock.calls[0][0]).toContain('/drive/v3/files/id1?fields=version,trashed');
     expect(fetchMock.mock.calls[1][0]).toContain('/drive/v3/files/id1?alt=media');
   });
   it('uploads a blob with its mime', async () => {
@@ -168,6 +168,18 @@ describe('downloadByName', () => {
   it('no such file: null, no download', async () => {
     fetchMock.mockResolvedValueOnce(json({ files: [] }));
     expect(await downloadByName('p1.jpg', 'Bills1')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('NotFound (M15)', () => {
+  it('a 404 throws NotFound', async () => {
+    fetchMock.mockResolvedValueOnce(json({ error: 'nf' }, 404));
+    await expect(readJson('gone')).rejects.toBeInstanceOf(NotFound);
+  });
+  it('a ledger in the trash reads as NotFound', async () => {
+    fetchMock.mockResolvedValueOnce(json({ version: '9', trashed: true }));
+    await expect(readJson('trashed')).rejects.toBeInstanceOf(NotFound);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -100,3 +100,13 @@ test('pending Retry: needsJoin opens the Join screen', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(window.location.hash).toBe('#/join'));
 });
+
+test('a shared ledger that is gone says to open the shared restaurant again (M15)', async () => {
+  await db.meta.put({ key: 'ledgerRef', value: { fileId: 'gone', joined: true } });
+  getAccessToken.mockResolvedValue('TOK');
+  const { readJson } = await import('../sync/drive');
+  vi.mocked(readJson).mockRejectedValueOnce(Object.assign(new Error('404'), { name: 'NotFound' }));
+  render(<SyncStatus />);
+  await act(async () => { await syncNow(); });
+  expect(screen.getByText('The shared restaurant can’t be found — open it again from Settings')).toBeTruthy();
+});

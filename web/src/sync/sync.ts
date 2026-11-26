@@ -9,7 +9,9 @@ import { LEDGER_TABLES, emptyLedger, merge, parseLedger, wins, canonical, type L
 
 /** 'pending': signed in but adoptPending is set; nothing synced until adoption / join settles it. */
 export type SyncStatusCode = 'ok' | 'offline' | 'authNeeded' | 'error' | 'pending';
-export interface SyncResult { status: SyncStatusCode; at: number; message?: string }
+/** code 'sharedGone': the joined (shared) ledger.json was deleted or trashed; Join must reopen it. */
+export type SyncErrorCode = 'sharedGone';
+export interface SyncResult { status: SyncStatusCode; at: number; message?: string; code?: SyncErrorCode }
 export interface SyncState {
   status: SyncStatusCode | 'idle';
   at: number | null;
@@ -17,6 +19,7 @@ export interface SyncState {
   /** bumps whenever a sync changed local rows, so screens can reload */
   revision: number;
   message?: string;
+  code?: SyncErrorCode;
 }
 /**
  * createdHere: this phone created the file (so it re-checks that no older ledger exists).
@@ -85,7 +88,7 @@ function resetTimers(): void {
   retryCount = 0;
   if (timer) clearTimeout(timer);
   timer = null;
-  setState({ status: 'idle', at: null, message: undefined });
+  setState({ status: 'idle', at: null, message: undefined, code: undefined });
 }
 
 // auth already deleted the meta keys; stop the timers here.
@@ -125,9 +128,10 @@ let applyingTx: Transaction | null = null;
  * row read inside this same transaction, so an edit made while the sync was in flight survives.
  * Returns the tables that changed.
  */
-async function applyMerged(merged: Ledger): Promise<Set<LedgerTable>> {
+async function applyMerged(merged: Ledger, live: () => void): Promise<Set<LedgerTable>> {
   const changed = new Set<LedgerTable>();
   await db.transaction('rw', LEDGER_TABLES.map(tbl), async (tx) => {
+    live(); // inside the transaction: a reset (Reset this phone, sign-out) since the last check aborts it
     applyingTx = tx;
     try {
       for (const t of LEDGER_TABLES) {
@@ -181,7 +185,9 @@ class Superseded extends Error {
   constructor() { super('The ledger changed during sync'); this.name = 'Superseded'; }
 }
 
-async function doSync(bypassPending: boolean): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
+type DoSyncResult = Omit<SyncResult, 'at'> & { at?: number; wrote?: boolean };
+
+async function doSync(bypassPending: boolean): Promise<DoSyncResult> {
   // signed in without a chosen ledger yet: no Drive calls until adoption / join decides (adoptPending)
   if (!bypassPending && (await db.meta.get('adoptPending'))?.value) return { status: 'pending' };
   const gen = generation;
@@ -200,7 +206,19 @@ async function doSync(bypassPending: boolean): Promise<Omit<SyncResult, 'at'> & 
     let remote: Ledger | null = null;
     let readVersion: string | null = null;
     if (ref.fileId) {
-      const r = await readJson(ref.fileId);
+      let r: { data: unknown; version: string };
+      try {
+        r = await readJson(ref.fileId);
+      } catch (e) {
+        if ((e as Error | undefined)?.name !== 'NotFound') throw e;
+        // the shared ledger was deleted or trashed: only its owner's phone can bring it back
+        if (ref.joined) return { status: 'error', code: 'sharedGone', message: 'The shared ledger.json is gone' };
+        // our own ledger.json is gone (deleted / trashed): forget it and find or create it again;
+        // this phone keeps the full replica, so the new file gets every row
+        live();
+        await db.meta.bulkDelete(['ledgerRef', 'lastSync']);
+        continue;
+      }
       remote = parseLedger(r.data);
       readVersion = r.version;
     }
@@ -208,6 +226,7 @@ async function doSync(bypassPending: boolean): Promise<Omit<SyncResult, 'at'> & 
 
     let version: string;
     let fileId: string;
+    let wrote = false;
     if (ref.fileId && remote && canonical(merged) === canonical(remote)) {
       // nothing new to push: don't bump the file version (saves the other phone a restart)
       version = readVersion!;
@@ -237,10 +256,11 @@ async function doSync(bypassPending: boolean): Promise<Omit<SyncResult, 'at'> & 
       }
       version = w.version;
       fileId = w.id;
+      wrote = true;
     }
     live();
     await setLedgerRef({ ...ref, fileId });
-    const changed = await applyMerged(merged);
+    const changed = await applyMerged(merged, live);
     const at = Date.now();
     live();
     await db.meta.put({ key: 'lastSync', value: { at, version } });
@@ -248,7 +268,7 @@ async function doSync(bypassPending: boolean): Promise<Omit<SyncResult, 'at'> & 
       setState({ revision: state.revision + 1 });
       if (changed.has('settings')) await reloadSettings();
     }
-    return { status: 'ok', at };
+    return { status: 'ok', at, wrote };
   }
   return { status: 'error', message: `ledger.json kept changing (${MAX_ATTEMPTS} attempts)` };
 }
@@ -267,7 +287,7 @@ function runSync(bypassPending: boolean): Promise<SyncResult> {
   if (running) return running;
   setState({ running: true });
   const p = (async (): Promise<SyncResult> => {
-    let r: Omit<SyncResult, 'at'> & { at?: number };
+    let r: DoSyncResult;
     let superseded = false;
     try {
       r = await doSync(bypassPending);
@@ -277,7 +297,8 @@ function runSync(bypassPending: boolean): Promise<SyncResult> {
       else if (isErr(e, Offline, 'Offline')) r = { status: 'offline' };
       else r = { status: 'error', message: e instanceof Error ? e.message : String(e) };
     }
-    const result: SyncResult = { ...r, at: r.at ?? Date.now() };
+    const { wrote, ...rest } = r;
+    const result: SyncResult = { ...rest, at: r.at ?? Date.now() };
     running = null;
     if (superseded) {
       // reset while running: leave the reset state (idle, no retry) as it is
@@ -286,12 +307,16 @@ function runSync(bypassPending: boolean): Promise<SyncResult> {
     }
     if (r.status === 'pending') {
       // shown as "Not syncing yet — finish connecting"; no retry (the adoption lookup settles it)
-      setState({ running: false, status: 'pending', message: undefined });
+      setState({ running: false, status: 'pending', message: undefined, code: undefined });
       return result;
     }
     if (r.status === 'error') console.warn('[sync]', r.message);
-    setState({ running: false, status: result.status, at: result.at, message: result.message });
+    setState({ running: false, status: result.status, at: result.at, message: result.message, code: result.code });
     planRetry(result.status);
+    // Drive has no conditional write: another phone's write could land between our version check
+    // and our write and be overwritten. One more pass re-reads and heals that (and finds nothing to
+    // write when all is well, so it stops there).
+    if (wrote && onOnline) scheduleSync();
     return result;
   })();
   running = p;

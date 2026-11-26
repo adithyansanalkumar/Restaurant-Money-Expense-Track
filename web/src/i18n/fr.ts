@@ -82,6 +82,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'sync.syncing': 'Synchronisation…',
   'sync.offline': 'Hors ligne — nouvel essai plus tard',
   'sync.signIn': 'Se connecter pour synchroniser',
+  'sync.sharedGone': 'Le restaurant partagé est introuvable — rouvrez-le depuis les Réglages',
   'sync.error': 'Erreur de synchronisation',
   'home.sync': 'Synchroniser',
   'home.period': 'Période',

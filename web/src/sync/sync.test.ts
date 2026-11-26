@@ -62,7 +62,7 @@ vi.mock('./auth', async (orig) => ({
 }));
 
 import { AuthNeeded, Offline } from './auth';
-import { _pendingSync, _retryDelay, checkBeforeReset, getSyncState, resetLedgerState, resetPhone, scheduleSync, startSync, stopSync, syncFresh, syncNow } from './sync';
+import { _pendingSync, _retryDelay, checkBeforeReset, getSyncState, resetLedgerState, setLedgerRef, resetPhone, scheduleSync, startSync, stopSync, syncFresh, syncNow } from './sync';
 import { signOut } from './auth';
 
 const empty = (): Ledger => ({ schema: 1, entries: [], payments: [], suppliers: [], categories: [], settings: [] });
@@ -575,5 +575,61 @@ describe('scheduleSync and hooks', () => {
     await vi.waitFor(() => expect(getSyncState().running).toBe(false));
     window.dispatchEvent(new Event('online'));
     await vi.waitFor(() => expect(drive.readJson).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('final-review hardening', () => {
+  it('M4: a sync that wrote the file schedules one more pass; a sync with nothing to write does not', async () => {
+    files.set('ledger1', { version: 1, data: empty() });
+    await put<Supplier>('suppliers', { id: 'L1', name: 'Local' }); // before startSync: no hook
+    currentEmail.mockResolvedValue(null); // no app-open sync
+    await startSync();
+    expect(_pendingSync()).toBe(false);
+    expect((await syncNow()).status).toBe('ok');
+    expect(drive.writeJson).toHaveBeenCalledTimes(1);
+    expect(_pendingSync()).toBe(true); // the follow-up pass heals a write that raced ours
+    stopSync();
+    await startSync();
+    expect((await syncNow()).status).toBe('ok'); // nothing new
+    expect(drive.writeJson).toHaveBeenCalledTimes(1);
+    expect(_pendingSync()).toBe(false);
+  });
+
+  it('M5: a reset landing just before the merged rows are applied writes nothing back', async () => {
+    files.set('ledger1', { version: 1, data: { ...empty(), entries: [entry({ id: 'R1' })] } });
+    await put<Supplier>('suppliers', { id: 'L1', name: 'Local' });
+    const orig = db.meta.put.bind(db.meta);
+    let armed = true;
+    vi.spyOn(db.meta, 'put').mockImplementation(((row: any) => {
+      const r = orig(row);
+      if (armed && row.key === 'ledgerRef') { armed = false; void resetLedgerState(); }
+      return r;
+    }) as any);
+    await syncNow();
+    expect(await db.entries.get('R1')).toBeUndefined();
+    expect(await db.meta.get('lastSync')).toBeUndefined();
+  });
+
+  const notFound = () => Object.assign(new Error('Drive request failed (404)'), { name: 'NotFound' });
+  it('M15: a 404 on our own stored ledger forgets the ref and re-resolves (a new ledger.json with our rows)', async () => {
+    await put<Supplier>('suppliers', { id: 'L1', name: 'Local' });
+    await setLedgerRef({ folderId: 'folder1', fileId: 'gone' });
+    drive.readJson.mockImplementation(async (id: string) => { if (id === 'gone') throw notFound(); return readImpl(id); });
+    expect((await syncNow()).status).toBe('ok');
+    expect((await db.meta.get('ledgerRef'))?.value).toMatchObject({ folderId: 'folder1', fileId: 'ledger1' });
+    expect(remote().suppliers.map((s) => s.id)).toEqual(['L1']);
+    drive.readJson.mockImplementation(async (id: string) => readImpl(id));
+  });
+
+  it('M15: a 404 on a joined ledger is an error asking to open the shared restaurant again; the ref is kept', async () => {
+    await setLedgerRef({ fileId: 'gone', joined: true });
+    drive.readJson.mockImplementation(async (id: string) => { if (id === 'gone') throw notFound(); return readImpl(id); });
+    const r = await syncNow();
+    expect(r.status).toBe('error');
+    expect(getSyncState()).toMatchObject({ status: 'error', code: 'sharedGone' });
+    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ fileId: 'gone', joined: true });
+    expect(drive.writeJson).not.toHaveBeenCalled();
+    expect(drive.ensureFolder).not.toHaveBeenCalled();
+    drive.readJson.mockImplementation(async (id: string) => readImpl(id));
   });
 });

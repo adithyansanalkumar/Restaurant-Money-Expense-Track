@@ -80,6 +80,7 @@ export const en = {
   'sync.syncing': 'Syncing…',
   'sync.offline': 'Offline — will retry',
   'sync.signIn': 'Sign in to sync',
+  'sync.sharedGone': 'The shared restaurant can’t be found — open it again from Settings',
   'sync.error': 'Sync error',
   'home.sync': 'Sync now',
   'home.period': 'Period',
