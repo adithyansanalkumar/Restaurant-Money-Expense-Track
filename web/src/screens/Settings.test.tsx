@@ -287,3 +287,29 @@ test('signed out but with a ledgerRef and another owner: read-only', async () =>
   expect(screen.queryByLabelText('Restaurant name')).toBeNull();
   expect(screen.queryByLabelText('Country')).toBeNull();
 });
+
+test('bill reading: Google AI choice writes ocrMode, reveals the key field; key stays on the device', async () => {
+  render(<Settings onGo={vi.fn()} />);
+  expect(await screen.findByRole('radio', { name: 'On this phone' })).toBeChecked();
+  expect(screen.queryByLabelText('Google AI key')).toBeNull();
+  fireEvent.click(screen.getByRole('radio', { name: /Google AI/ }));
+  await waitFor(async () => expect((await shared()).ocrMode).toBe('gemini'));
+  const key = await screen.findByLabelText('Google AI key');
+  expect(key).toHaveAttribute('type', 'password');
+  expect(screen.getByText(/sent to Google/)).toBeTruthy();
+  fireEvent.change(key, { target: { value: 'AIza123' } });
+  fireEvent.blur(key);
+  await waitFor(async () => expect((await db.meta.get('geminiKey'))?.value).toBe('AIza123'));
+  expect(JSON.stringify(await shared())).not.toContain('AIza123');
+  fireEvent.click(screen.getByRole('radio', { name: 'On this phone' }));
+  await waitFor(async () => expect((await shared()).ocrMode).toBe('device'));
+});
+
+test('bill reading mode is not written while adoptPending', async () => {
+  await db.meta.put({ key: 'adoptPending', value: true });
+  const before = await shared();
+  render(<Settings onGo={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('radio', { name: /Google AI/ }));
+  await new Promise((r) => setTimeout(r, 30));
+  expect(await shared()).toEqual(before);
+});

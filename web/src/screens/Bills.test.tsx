@@ -135,3 +135,63 @@ test('the picker input survives Retake so the retaken photo is read', async () =
   expect(await db.photos.count()).toBe(1);
   vi.restoreAllMocks();
 });
+
+// ---- Google AI bill reading (optional) ----
+const gem = (obj: unknown) => vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] }) });
+
+test('gemini mode + key: Google reads the bill, device OCR is not used', async () => {
+  await saveShared({ ocrMode: 'gemini' });
+  await db.meta.put({ key: 'geminiKey', value: 'K' });
+  const f = gem({ shop: 'Marché', date: '2026-11-25', incl: '184,50' });
+  vi.stubGlobal('fetch', f);
+  render(<Bills onGo={vi.fn()} />);
+  pick();
+  await screen.findByText('Check the details');
+  expect(f).toHaveBeenCalledTimes(1);
+  expect(readBill).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Total incl. tax')).toHaveValue('184,50');
+  vi.unstubAllGlobals();
+});
+
+test('gemini error falls back to the phone and shows a notice', async () => {
+  await saveShared({ ocrMode: 'gemini' });
+  await db.meta.put({ key: 'geminiKey', value: 'K' });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }));
+  vi.mocked(readBill).mockResolvedValue(TEXT);
+  render(<Bills onGo={vi.fn()} />);
+  pick();
+  await screen.findByText('Check the details');
+  expect(readBill).toHaveBeenCalled();
+  expect(screen.getByText('Google AI unavailable — read on this phone instead')).toBeInTheDocument();
+  vi.unstubAllGlobals();
+});
+
+test('gemini mode without a key on this phone uses the phone, no notice', async () => {
+  await saveShared({ ocrMode: 'gemini' });
+  const f = vi.fn();
+  vi.stubGlobal('fetch', f);
+  vi.mocked(readBill).mockResolvedValue(TEXT);
+  render(<Bills onGo={vi.fn()} />);
+  pick();
+  await screen.findByText('Check the details');
+  expect(f).not.toHaveBeenCalled();
+  expect(readBill).toHaveBeenCalled();
+  expect(screen.queryByText(/Google AI unavailable/)).toBeNull();
+  vi.unstubAllGlobals();
+});
+
+test('offline goes straight to the phone', async () => {
+  await saveShared({ ocrMode: 'gemini' });
+  await db.meta.put({ key: 'geminiKey', value: 'K' });
+  const f = vi.fn();
+  vi.stubGlobal('fetch', f);
+  const spy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  vi.mocked(readBill).mockResolvedValue(TEXT);
+  render(<Bills onGo={vi.fn()} />);
+  pick();
+  await screen.findByText('Check the details');
+  expect(f).not.toHaveBeenCalled();
+  expect(readBill).toHaveBeenCalled();
+  spy.mockRestore();
+  vi.unstubAllGlobals();
+});

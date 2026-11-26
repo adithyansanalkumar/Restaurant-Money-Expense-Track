@@ -18,6 +18,22 @@ import { PinSetup } from '../lock/PinSetup';
 import { primaryBtn } from '../lock/PinPad';
 import { errorText, mutedText, noticeText, secondaryBtn } from '../ui/styles';
 import { CategoriesEditor } from './CategoriesEditor';
+import { getGeminiKey, setGeminiKey } from '../ocr/gemini';
+
+/** Google AI key field: saved on this phone only (device meta), never in shared settings. */
+function GeminiKeyInput() {
+  const [v, setV] = useState('');
+  useEffect(() => { void getGeminiKey().then((k) => setV(k ?? '')).catch(() => {}); }, []);
+  return (
+    <div style={col}>
+      <label style={label} htmlFor="gemini-key">{t('settings.geminiKey')}</label>
+      <input id="gemini-key" type="password" autoComplete="off" autoCapitalize="off" spellCheck={false} value={v}
+        onChange={(e) => setV(e.target.value)} onBlur={() => void setGeminiKey(v)}
+        style={{ ...select, width: '100%', boxSizing: 'border-box' }} />
+      <div style={hint}>{t('settings.geminiKeyHelp')}</div>
+    </div>
+  );
+}
 
 const CURRENCIES = ['EUR', 'CHF', 'GBP', 'INR', 'USD'];
 const label: CSSProperties = { fontSize: 12, fontWeight: 600, color: '#C6D8E6' };
@@ -304,11 +320,22 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
       </Card>
 
       <Card title={t('settings.billReading')}>
-        <div aria-label={t('settings.billReading')} style={{ display: 'flex', flexDirection: 'column', gap: 2, minHeight: 44, justifyContent: 'center' }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>{t('settings.ocrDevice')}</span>
-          <span style={{ fontSize: 12, color: '#B3C8D9' }}>{t('settings.ocrDeviceHint')}</span>
+        <div role="radiogroup" aria-label={t('settings.billReading')} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {([['device', 'settings.ocrDevice', 'settings.ocrDeviceHint'], ['gemini', 'settings.ocrGoogle', 'settings.ocrGoogleHint']] as const).map(([mode, l, h]) => (
+            <button key={mode} type="button" role="radio" aria-checked={shared?.ocrMode === mode || (mode === 'device' && shared?.ocrMode !== 'gemini')}
+              aria-label={t(l)} disabled={pending} onClick={() => void save({ ocrMode: mode })}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, padding: 0, border: 0, background: 'transparent', color: '#FFFFFF', textAlign: 'left', opacity: pending ? 0.6 : 1 }}>
+              <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 11, border: '2px solid #FFFFFF', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {(shared?.ocrMode === mode || (mode === 'device' && shared?.ocrMode !== 'gemini')) && <span style={{ width: 10, height: 10, borderRadius: 5, background: '#6FE3A0' }} />}
+              </span>
+              <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{t(l)}</span>
+                <span style={{ fontSize: 12, color: '#B3C8D9' }}>{t(h)}</span>
+              </span>
+            </button>
+          ))}
         </div>
-        {/* TASK 17: the "Google AI" bill-reading option goes here (shared setting ocrMode: 'gemini'). */}
+        {shared?.ocrMode === 'gemini' && <GeminiKeyInput />}
       </Card>
 
       <Card title={t('settings.export')}>

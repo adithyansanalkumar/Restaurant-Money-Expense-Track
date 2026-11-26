@@ -5,6 +5,7 @@ import type { Id, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
 import { compressPhoto, deletePhoto, listPhotos, saveAllPhotos, savePhoto } from '../photos/photos';
 import { readBill } from '../ocr/ocr';
+import { getGeminiKey, readBillWithGemini } from '../ocr/gemini';
 import { parseReceipt, type ParsedReceipt } from '../ocr/parseReceipt';
 import { t, useLanguage } from '../i18n';
 import { useSettings } from '../settings/store';
@@ -42,14 +43,21 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
-    setReading(true);
+    setReading(true); setNotice('');
     try {
       const blob = await compressPhoto(file);
       const photoId = await savePhoto(blob);
       const suppliers = await listLive<Supplier>('suppliers');
       let parsed: ParsedReceipt = {};
       let ocrFailed = false;
-      try { parsed = parseReceipt(await readBill(blob, lang), lang, suppliers); } catch { ocrFailed = true; }
+      let viaDevice = true;
+      if (shared?.ocrMode === 'gemini' && navigator.onLine !== false) {
+        const key = await getGeminiKey().catch(() => null);
+        if (key) {
+          try { parsed = await readBillWithGemini(blob, key, suppliers); viaDevice = false; } catch { setNotice(t('bills.geminiFallback')); }
+        }
+      }
+      if (viaDevice) { try { parsed = parseReceipt(await readBill(blob, lang), lang, suppliers); } catch { ocrFailed = true; } }
       let url: string | undefined;
       try { url = URL.createObjectURL(blob); } catch { /* ignore */ }
       setChecking({ photoId, url, parsed, suppliers, ocrFailed });
@@ -84,6 +92,7 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 520, margin: '0 auto' }}>
       {picker}
+      {checking && notice && <div role="status" style={{ textAlign: 'center', fontSize: 13, color: '#C6D8E6' }}>{notice}</div>}
       {checking ? (
         <BillCheck photoId={checking.photoId} photoUrl={checking.url} parsed={checking.parsed} suppliers={checking.suppliers}
           ocrFailed={checking.ocrFailed} onRetake={retake} onClose={closeCheck} onGo={onGo} />
