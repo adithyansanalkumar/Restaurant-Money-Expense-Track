@@ -7,6 +7,7 @@ import { todayISO } from '../domain/clock';
 import type { Entry, Id, Payment, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
 import { t, useLanguage } from '../i18n';
+import { useSyncStatus } from '../sync/sync';
 import { initials } from './AddEntry';
 import { RecordPayment } from './RecordPayment';
 
@@ -21,13 +22,14 @@ export function Owe({ onGo }: { onGo: (r: Route) => void }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [expanded, setExpanded] = useState<Id | null | undefined>(undefined); // undefined = default first card
   const [paying, setPaying] = useState<Id | null>(null);
+  const { revision } = useSyncStatus();
   const today = todayISO();
 
   const load = useCallback(async () => {
     const [e, p, s] = await Promise.all([listLive<Entry>('entries'), listLive<Payment>('payments'), listLive<Supplier>('suppliers')]);
     setEntries(e); setPayments(p); setSuppliers(s);
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, revision]); // revision: a sync changed rows
 
   const balances = useMemo(() => supplierBalances(entries, payments), [entries, payments]);
   const bills = useMemo(() => openBills(entries, payments), [entries, payments]);

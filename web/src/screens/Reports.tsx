@@ -10,6 +10,9 @@ import { listLive } from '../db/repo';
 import { t, useLanguage } from '../i18n';
 import { exportExcel, exportFilename } from '../export/workbook';
 import { shareOrDownload } from '../export/share';
+import { saveExportToDrive } from '../export/drive';
+import { currentEmail } from '../sync/auth';
+import { isAdoptPending, useSyncStatus } from '../sync/sync';
 
 type Preset = '3M' | '6M' | '1Y' | 'custom';
 const PRESETS: Preset[] = ['3M', '6M', '1Y', 'custom'];
@@ -38,6 +41,7 @@ export function Reports() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const { revision } = useSyncStatus();
 
   useEffect(() => {
     let live = true;
@@ -46,7 +50,7 @@ export function Reports() {
       if (live) { setEntries(e); setPayments(p); setCategories(c); }
     })();
     return () => { live = false; };
-  }, []);
+  }, [revision]); // revision: a sync changed rows
 
   const range = preset === 'custom'
     ? { from: customFrom, to: customTo }
@@ -77,8 +81,17 @@ export function Reports() {
     setBusy(true); setMessage('');
     try {
       const blob = await exportExcel(range.from, range.to);
-      const res = await shareOrDownload(blob, exportFilename(range.from, range.to));
-      setMessage(res === 'shared' ? t('reports.shared') : t('reports.downloaded'));
+      const filename = exportFilename(range.from, range.to);
+      const res = await shareOrDownload(blob, filename);
+      let text = res === 'shared' ? t('reports.shared') : t('reports.downloaded');
+      // Best effort copy in Google Drive when signed in; a failure here is not worth alarming anyone.
+      try {
+        if ((await currentEmail()) && !(await isAdoptPending())) {
+          await saveExportToDrive(blob, filename);
+          text += ` · ${t('reports.savedDrive')}`;
+        }
+      } catch { /* the export itself worked */ }
+      setMessage(text);
     } catch {
       setMessage(t('reports.exportFailed'));
     } finally { setBusy(false); }

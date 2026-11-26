@@ -43,4 +43,6 @@ export interface SharedSettings extends Base {
   ocrMode: 'device' | 'gemini';
   /** Google account that created the restaurant (only it can share). Unset when made signed out. */
   ownerEmail?: string;
+  /** Emails the owner invited (a small "who has access" list). */
+  sharedWith?: string[];
 }

@@ -15,7 +15,9 @@ import { useSettings } from './settings/store';
 import { Lock } from './screens/Lock';
 import { Welcome } from './screens/Welcome';
 import { Join } from './screens/Join';
-import { SharePanel } from './screens/SharePanel';
+import { Settings } from './screens/Settings';
+import { backupPendingPhotos } from './photos/backup';
+import { useSyncStatus } from './sync/sync';
 import { hasPin, onPinChange, shouldLock } from './lock/lock';
 
 export function App() {
@@ -23,6 +25,7 @@ export function App() {
   const [route, rawGo] = useRoute();
   const go = useCallback((r: Route) => { if (r !== 'add') setEditing(null); rawGo(r); }, [rawGo]);
   const { loaded, shared } = useSettings();
+  const { at: syncedAt } = useSyncStatus();
   const needsSetup = loaded && !shared;
   // 'checking' until we know whether a PIN exists; while 'locked' nothing else renders.
   // 'error' = the lock could not be read: fail closed, never open.
@@ -69,6 +72,11 @@ export function App() {
     else if (!needsSetup && route === 'setup') go('home');
   }, [loaded, needsSetup, route, go]);
 
+  // Optional photo backup after each successful sync (no-op unless the setting is on and signed in).
+  useEffect(() => {
+    if (syncedAt) void backupPendingPhotos().catch(() => {});
+  }, [syncedAt]);
+
   // Drop the edit hand-off whenever we leave 'add' (e.g. browser back).
   useEffect(() => { if (route !== 'add') setEditing(null); }, [route]);
 
@@ -101,10 +109,9 @@ export function App() {
     );
   }
   if (route === 'settings') {
-    // Temporary until the full Settings screen (Task 16 part B): account and sharing only.
     return (
       <div className="scene app-shell">
-        <SharePanel />
+        <Settings onGo={go} />
         <TabBar current={route} onGo={go} />
       </div>
     );

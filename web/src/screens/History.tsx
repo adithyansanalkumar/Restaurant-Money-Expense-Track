@@ -8,6 +8,7 @@ import type { Category, Entry, Payment, Supplier } from '../domain/types';
 import { db } from '../db/db';
 import { listLive, softDelete } from '../db/repo';
 import { t, useLanguage } from '../i18n';
+import { useSyncStatus } from '../sync/sync';
 import { PhotoViewer } from './PhotoViewer';
 
 const IN = '#6FE3A0';
@@ -22,12 +23,13 @@ export function History({ onGo }: { onGo: (r: Route) => void }) {
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState<Entry | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
+  const { revision } = useSyncStatus();
 
   const load = useCallback(async () => {
     const [e, s, c] = await Promise.all([listLive<Entry>('entries'), listLive<Supplier>('suppliers'), listLive<Category>('categories')]);
     setEntries(e); setSuppliers(s); setCategories(c);
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, revision]); // revision: a sync changed rows
 
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '';
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? '';

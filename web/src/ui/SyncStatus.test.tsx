@@ -75,3 +75,16 @@ test('pending: "Not syncing yet — finish connecting" with Retry that runs the 
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(screen.queryByText('Not syncing yet — finish connecting')).toBeNull());
 });
+
+test('pending Retry: when the lookup says authNeeded it falls back to signing in again', async () => {
+  await db.meta.put({ key: 'adoptPending', value: true });
+  render(<SyncStatus />);
+  await act(async () => { await syncNow(); await syncNow(); }); // the first may be a leftover run from the test before
+  await screen.findByText('Not syncing yet — finish connecting');
+  adopt.mockReset();
+  adopt.mockResolvedValueOnce('authNeeded');
+  signIn.mockResolvedValue({ email: 'a@b.com' });
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
+  expect(adopt).toHaveBeenCalledTimes(1); // the lookup that said authNeeded
+});

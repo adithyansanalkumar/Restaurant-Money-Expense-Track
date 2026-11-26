@@ -101,6 +101,18 @@ describe('inviteByEmail', () => {
     expect(drive.shareFolder).toHaveBeenCalledWith('F1', 'son@gmail.com');
     expect(drive.shareFile).not.toHaveBeenCalled();
   });
+  it('records the invited email in shared settings (sharedWith), once, unless adoptPending', async () => {
+    await saveShared({ restaurantName: 'R', ownerEmail: 'adi@x.com' });
+    await db.meta.put({ key: 'ledgerRef', value: { folderId: 'F1', fileId: 'L1' } });
+    await inviteByEmail('son@gmail.com');
+    await inviteByEmail('SON@gmail.com');
+    expect((await db.settings.get('shared'))!.sharedWith).toEqual(['son@gmail.com']);
+    await db.meta.put({ key: 'adoptPending', value: true });
+    const before = await db.settings.get('shared');
+    await inviteByEmail('other@gmail.com');
+    expect(await db.settings.get('shared')).toEqual(before); // the invite went out; nothing shared was written
+    await db.meta.delete('adoptPending');
+  });
   it('a ledger ref with no folderId shares the file itself', async () => {
     await saveShared({ restaurantName: 'R', ownerEmail: 'adi@x.com' });
     await db.meta.put({ key: 'ledgerRef', value: { fileId: 'L1', joined: true } });

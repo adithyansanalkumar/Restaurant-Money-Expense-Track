@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { reloadSettings } from '../settings/store';
+import { reloadSettings, saveShared } from '../settings/store';
 import { Offline, currentEmail, getAccessToken } from './auth';
 import { ensureFolder, findFile, shareFile, shareFolder, type Id } from './drive';
 import { FOLDER_NAME, LEDGER_NAME, clearAdoptPending, dropLocalShared, resetLedgerState, restoreLocalShared, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
@@ -69,11 +69,34 @@ export async function inviteByEmail(email: string): Promise<void> {
   if (ref.folderId) await shareFolder(ref.folderId, addr);
   else if (ref.fileId) await shareFile(ref.fileId, addr);
   else throw new NoLedger();
+  await rememberInvited(addr);
+}
+
+/** Keeps a small "who has access" list in shared settings. Never while adoptPending; best effort. */
+async function rememberInvited(addr: string): Promise<void> {
+  try {
+    if ((await db.meta.get('adoptPending'))?.value) return;
+    const shared = await db.settings.get('shared');
+    if (!shared || shared.deleted) return;
+    const list = shared.sharedWith ?? [];
+    if (list.some((e) => same(e, addr))) return;
+    await saveShared({ sharedWith: [...list, addr] });
+  } catch { /* the invite itself went out */ }
 }
 
 /** This account's own "Restaurant Accounts" folder (a joined phone's exports and photos go here). */
 export function ownFolderId(): Promise<Id> {
   return ensureFolder(FOLDER_NAME);
+}
+
+/**
+ * Where this phone keeps its Bills and Exports subfolders: the ledger folder for the owner,
+ * this account's own "Restaurant Accounts" folder for a joined phone.
+ */
+export async function ledgerParentFolder(): Promise<Id> {
+  const ref = await storedRef();
+  if (ref && !ref.joined && ref.folderId) return ref.folderId;
+  return ownFolderId();
 }
 
 // ---------------- Google Picker ----------------

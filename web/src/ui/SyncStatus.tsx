@@ -31,7 +31,11 @@ export function SyncStatus({ style }: { style?: React.CSSProperties }) {
   const [retrying, setRetrying] = useState(false);
   const retry = async () => {
     setRetrying(true);
-    try { report(await adoptExistingLedger()); } catch { setFailed(true); } finally { setRetrying(false); }
+    try {
+      const r = await adoptExistingLedger();
+      // session gone: Retry can't succeed, so fall back to signing in again
+      if (r === 'authNeeded') await go(); else report(r);
+    } catch { setFailed(true); } finally { setRetrying(false); }
   };
   const base: React.CSSProperties = { fontSize: 12, color: '#C6D8E6', ...style };
 
