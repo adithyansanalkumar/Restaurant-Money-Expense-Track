@@ -22,6 +22,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'setup.exclHint': 'HT · sous-total',
   'setup.continue': 'Continuer',
   'setup.joining': 'Vous rejoignez un restaurant partagé ?',
+  'setup.error': "Échec de l'enregistrement. Réessayez.",
   'setup.openHere': 'Ouvrez-le ici',
   'lang.en': 'English',
   'lang.fr': 'Français',

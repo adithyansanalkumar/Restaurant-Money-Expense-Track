@@ -20,6 +20,7 @@ export const en = {
   'setup.exclHint': 'HT · subtotal',
   'setup.continue': 'Continue',
   'setup.joining': 'Joining a shared restaurant?',
+  'setup.error': "Could not save. Please try again.",
   'setup.openHere': 'Open it here',
   'lang.en': 'English',
   'lang.fr': 'Français',

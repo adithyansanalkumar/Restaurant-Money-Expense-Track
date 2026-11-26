@@ -21,6 +21,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
   const [billLanguage, setBillLanguage] = useState<'fra' | 'eng'>(COUNTRY_DEFAULTS.FR.billLanguage);
   const [taxView, setTaxView] = useState<'incl' | 'excl'>('incl');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
 
   const pickCountry = (c: string) => {
     setCountry(c);
@@ -31,10 +32,18 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
   const cont = async () => {
     if (busy) return;
     setBusy(true);
-    await saveShared({ restaurantName: name.trim(), country, currency, billLanguage, taxView, photoBackup: false, ocrMode: 'device' });
-    await saveDevice({ appLanguage: device.appLanguage });
-    await seedDefaults();
-    onGo('home');
+    setError(false);
+    try {
+      // Shared settings go last: once that row exists, App stops routing to setup.
+      await seedDefaults();
+      await saveDevice({ appLanguage: device.appLanguage });
+      await saveShared({ restaurantName: name.trim(), country, currency, billLanguage, taxView, photoBackup: false, ocrMode: 'device' });
+      onGo('home');
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const totalBtn = (v: 'incl' | 'excl', title: string, hint: string) => {
@@ -102,6 +111,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
         </div>
       </Glass>
 
+      {error && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E' }}>{t('setup.error')}</div>}
       <button type="button" onClick={() => void cont()} disabled={busy} style={{
         alignSelf: 'stretch', marginTop: 'auto', height: 58, borderRadius: 29, border: 0,
         background: 'linear-gradient(160deg, #FFFFFF 0%, #DDF2FB 100%)',
@@ -110,7 +120,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       }}>{t('setup.continue')}</button>
       <div style={{ fontSize: 13, color: '#C6D8E6' }}>
         {t('setup.joining')}{' '}
-        <a href="#/join" style={{ color: '#8FD8F2' }} onClick={(e) => { e.preventDefault(); onGo('join'); }}>{t('setup.openHere')}</a>
+        <a href="#/join" style={{ color: '#8FD8F2', display: 'inline-flex', alignItems: 'center', minHeight: 44 }} onClick={(e) => { e.preventDefault(); onGo('join'); }}>{t('setup.openHere')}</a>
       </div>
     </div>
   );
