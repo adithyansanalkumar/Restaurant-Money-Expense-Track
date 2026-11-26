@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Glass } from './ui/Glass';
 import { TabBar } from './ui/TabBar';
 import { useRoute, type Route } from './ui/router';
@@ -12,6 +12,8 @@ import { Owe } from './screens/Owe';
 import { AddEntry } from './screens/AddEntry';
 import { t, useLanguage } from './i18n';
 import { useSettings } from './settings/store';
+import { Lock } from './screens/Lock';
+import { hasPin, shouldLock } from './lock/lock';
 
 export function App() {
   useLanguage();
@@ -19,6 +21,28 @@ export function App() {
   const go = useCallback((r: Route) => { if (r !== 'add') setEditing(null); rawGo(r); }, [rawGo]);
   const { loaded, shared } = useSettings();
   const needsSetup = loaded && !shared;
+  // 'checking' until we know whether a PIN exists; while 'locked' nothing else renders.
+  const [lockState, setLockState] = useState<'checking' | 'locked' | 'open'>('checking');
+  const hiddenAt = useRef<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void hasPin().then((p) => { if (live) setLockState(p ? 'locked' : 'open'); }, () => { if (live) setLockState('open'); });
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt.current = Date.now(); return; }
+      const at = hiddenAt.current;
+      hiddenAt.current = null;
+      if (at !== null && shouldLock(at, Date.now())) {
+        void hasPin().then((p) => { if (p) setLockState('locked'); });
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   useEffect(() => {
     if (!loaded) return;
@@ -29,7 +53,8 @@ export function App() {
   // Drop the edit hand-off whenever we leave 'add' (e.g. browser back).
   useEffect(() => { if (route !== 'add') setEditing(null); }, [route]);
 
-  if (!loaded) return <div className="scene app-shell" />;
+  if (lockState === 'locked') return <Lock onUnlock={() => setLockState('open')} />;
+  if (!loaded || lockState === 'checking') return <div className="scene app-shell" />;
   if (route === 'setup' || (needsSetup && route !== 'join')) {
     return <div className="scene app-shell"><Setup onGo={go} /></div>;
   }
