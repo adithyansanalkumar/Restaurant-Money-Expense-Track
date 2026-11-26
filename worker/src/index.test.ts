@@ -4,7 +4,8 @@ import worker, { type Env } from './index';
 class MemKV {
   m = new Map<string, string>();
   async get(k: string) { return this.m.get(k) ?? null; }
-  async put(k: string, v: string) { this.m.set(k, v); }
+  puts: { k: string; opts?: { expirationTtl?: number } }[] = [];
+  async put(k: string, v: string, opts?: { expirationTtl?: number }) { this.m.set(k, v); this.puts.push({ k, opts }); }
   async delete(k: string) { this.m.delete(k); }
 }
 
@@ -107,12 +108,29 @@ describe('/exchange', () => {
     expect(value).not.toContain('RT-SECRET-123');
     expect(atob(value.replace(/-/g, '+').replace(/_/g, '/')).includes('RT-SECRET-123')).toBe(false);
   });
-  it('400 no_refresh_token when Google returns none', async () => {
-    fetchMock.mockResolvedValueOnce(json({ access_token: 'AT', expires_in: 10, id_token: idToken({ email: 'a@b.com' }) }));
+  it('409 consent_required when Google returns no refresh token, and revokes the access token (form body)', async () => {
+    fetchMock.mockResolvedValueOnce(json({ access_token: 'AT-NORT', expires_in: 10, id_token: idToken({ email: 'a@b.com' }) }));
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 200 }));
     const res = await call(req('/exchange', { code: 'C' }));
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'no_refresh_token' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'consent_required' });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(ORIGIN);
     expect(kv.m.size).toBe(0);
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(url).toBe('https://oauth2.googleapis.com/revoke');
+    expect(init.method).toBe('POST');
+    expect(init.headers['content-type']).toBe('application/x-www-form-urlencoded');
+    expect(new URLSearchParams(init.body as string).get('token')).toBe('AT-NORT');
+  });
+  it('still 409 when revoking the access token fails', async () => {
+    fetchMock.mockResolvedValueOnce(json({ access_token: 'AT', expires_in: 10, id_token: idToken({ email: 'a@b.com' }) }));
+    fetchMock.mockRejectedValueOnce(new Error('net'));
+    const res = await call(req('/exchange', { code: 'C' }));
+    expect(res.status).toBe(409);
+  });
+  it('stores the session with a 180-day TTL', async () => {
+    await doExchange();
+    expect(kv.puts[0].opts).toEqual({ expirationTtl: 15552000 });
   });
 });
 
@@ -132,6 +150,21 @@ describe('/refresh', () => {
     expect(p.get('grant_type')).toBe('refresh_token');
     expect(p.get('refresh_token')).toBe('RT-SECRET-123');
   });
+  it('renews the 180-day TTL on each successful refresh', async () => {
+    const { session } = await (await doExchange()).json() as any;
+    const value = [...kv.m.values()][0];
+    fetchMock.mockResolvedValueOnce(json({ access_token: 'AT2', expires_in: 3000 }));
+    await call(req('/refresh', { session }));
+    expect(kv.puts).toHaveLength(2);
+    expect(kv.puts[1]).toEqual({ k: kv.puts[0].k, opts: { expirationTtl: 15552000 } });
+    expect(await env.TOKENS.get(kv.puts[0].k)).toBe(value);
+  });
+  it('does not renew the TTL when the refresh fails', async () => {
+    const { session } = await (await doExchange()).json() as any;
+    fetchMock.mockResolvedValueOnce(json({ error: 'server' }, 500));
+    expect((await call(req('/refresh', { session }))).status).toBe(502);
+    expect(kv.puts).toHaveLength(1);
+  });
   it('invalid_grant deletes the key and returns 401', async () => {
     const { session } = await (await doExchange()).json() as any;
     fetchMock.mockResolvedValueOnce(json({ error: 'invalid_grant' }, 400));
@@ -148,7 +181,12 @@ describe('/revoke', () => {
     const res = await call(req('/revoke', { session }));
     expect(res.status).toBe(204);
     expect(kv.m.size).toBe(0);
-    expect(fetchMock.mock.calls[1][0]).toBe('https://oauth2.googleapis.com/revoke?token=RT-SECRET-123');
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(url).toBe('https://oauth2.googleapis.com/revoke');
+    expect(url).not.toContain('RT-SECRET-123');
+    expect(init.method).toBe('POST');
+    expect(init.headers['content-type']).toBe('application/x-www-form-urlencoded');
+    expect(new URLSearchParams(init.body as string).get('token')).toBe('RT-SECRET-123');
   });
   it('204 even if Google errors', async () => {
     const { session } = await (await doExchange()).json() as any;
@@ -156,5 +194,43 @@ describe('/revoke', () => {
     const res = await call(req('/revoke', { session }));
     expect(res.status).toBe(204);
     expect(kv.m.size).toBe(0);
+  });
+});
+
+describe('hardening', () => {
+  it('an unexpected error returns 500 server_error with CORS headers', async () => {
+    kv.get = async () => { throw new Error('kv down'); };
+    const res = await call(req('/refresh', { session: 'x' }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'server_error' });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(ORIGIN);
+    expect(res.headers.get('content-type')).toBe('application/json');
+  });
+  it('a network error talking to Google returns 500 server_error with CORS', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('net'));
+    const res = await call(req('/exchange', { code: 'C' }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'server_error' });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(ORIGIN);
+  });
+  it('an ENC_KEY that is not 32 bytes gives 500 server_error and stores nothing', async () => {
+    env.ENC_KEY = btoa('short-key-16byte');
+    const res = await call(req('/exchange', { code: 'CODE' }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'server_error' });
+    expect(fetchMock).not.toHaveBeenCalled(); // the one-time code is not spent
+    expect(kv.m.size).toBe(0);
+  });
+  it('a bad ENC_KEY on /refresh is a 500 and keeps the stored session', async () => {
+    const { session } = await (await doExchange()).json() as any;
+    env.ENC_KEY = btoa('x'.repeat(31));
+    const res = await call(req('/refresh', { session }));
+    expect(res.status).toBe(500);
+    expect(kv.m.size).toBe(1);
+  });
+  it('accepts a standard base64 32-byte key (openssl rand -base64 32)', async () => {
+    env.ENC_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(0xfb)));
+    expect(env.ENC_KEY).toMatch(/[+/]/);
+    expect((await doExchange()).status).toBe(200);
   });
 });

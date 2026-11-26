@@ -21,8 +21,16 @@ export async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** ENC_KEY must be base64 (standard or url-safe) of exactly 32 bytes (AES-256). Throws otherwise. */
+export function assertKey(encKeyB64: string): Uint8Array<ArrayBuffer> {
+  let raw: Uint8Array<ArrayBuffer>;
+  try { raw = b64urlDecode((encKeyB64 ?? '').trim()); } catch { throw new Error('ENC_KEY is not base64'); }
+  if (raw.length !== 32) throw new Error('ENC_KEY must decode to 32 bytes');
+  return raw;
+}
+
 async function importKey(encKeyB64: string): Promise<CryptoKey> {
-  const raw = b64urlDecode(encKeyB64);
+  const raw = assertKey(encKeyB64);
   return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
