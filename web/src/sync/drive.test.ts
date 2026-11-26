@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const getAccessToken = vi.fn();
 vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: (force?: boolean) => getAccessToken(force) }));
 
-import { ensureFolder, findFile, readJson, writeJson, uploadBlob, shareFolder, getVersion } from './drive';
+import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, getVersion } from './drive';
 import { Offline } from './auth';
 
 const fetchMock = vi.fn();
@@ -70,12 +70,36 @@ describe('ensureFolder / findFile', () => {
     );
   });
   it('creates when missing', async () => {
-    fetchMock.mockResolvedValueOnce(json({ files: [] })).mockResolvedValueOnce(json({ id: 'new' }));
+    fetchMock.mockResolvedValueOnce(json({ files: [] })).mockResolvedValueOnce(json({ id: 'new' })).mockResolvedValueOnce(json({ files: [{ id: 'new' }] }));
     expect(await ensureFolder('F')).toBe('new');
     const [url, init] = fetchMock.mock.calls[1];
     expect(url).toContain('https://www.googleapis.com/drive/v3/files');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ name: 'F', mimeType: 'application/vnd.google-apps.folder' });
+  });
+  it('lists oldest first (orderBy createdTime) and picks the oldest', async () => {
+    fetchMock.mockResolvedValueOnce(json({ files: [{ id: 'old' }] })).mockResolvedValueOnce(json({ files: [{ id: 'oldf', version: '2' }] }));
+    expect(await findFolder('F')).toBe('old');
+    expect(await findFile('x.json', 'p')).toEqual({ id: 'oldf', version: '2' });
+    for (const [u] of fetchMock.mock.calls) {
+      const url = new URL(u);
+      expect(url.searchParams.get('orderBy')).toBe('createdTime');
+      expect(url.searchParams.get('pageSize')).toBe('1');
+    }
+  });
+  it('ensureFolder re-lists after creating and switches to an older folder made concurrently', async () => {
+    fetchMock.mockResolvedValueOnce(json({ files: [] }))
+      .mockResolvedValueOnce(json({ id: 'mine' }))
+      .mockResolvedValueOnce(json({ files: [{ id: 'theirs' }, { id: 'mine' }] }));
+    expect(await ensureFolder('F')).toBe('theirs');
+    const relist = new URL(fetchMock.mock.calls[2][0]);
+    expect(relist.searchParams.get('orderBy')).toBe('createdTime');
+    expect(relist.searchParams.get('pageSize')).toBe('2');
+  });
+  it('listFiles returns up to pageSize files oldest first', async () => {
+    fetchMock.mockResolvedValueOnce(json({ files: [{ id: 'a', version: '1' }, { id: 'b', version: '3' }] }));
+    expect(await listFiles('x.json', 'p', 2)).toEqual([{ id: 'a', version: '1' }, { id: 'b', version: '3' }]);
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('pageSize')).toBe('2');
   });
   it('findFile returns id+version or null', async () => {
     fetchMock.mockResolvedValueOnce(json({ files: [{ id: 'a', version: '7' }] })).mockResolvedValueOnce(json({ files: [] }));

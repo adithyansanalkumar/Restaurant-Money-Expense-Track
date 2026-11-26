@@ -15,29 +15,34 @@ export async function put<T extends Base>(
   obj: Omit<T, 'updatedAt' | 'deviceId' | 'deleted' | 'id'> & Partial<Base>,
 ): Promise<T> {
   const id = obj.id ?? crypto.randomUUID();
-  const deviceId = await getDeviceId();
-  const existing = obj.id ? await tbl(table).get(id) : undefined;
-  const row = {
-    ...obj,
-    id,
-    // monotonic: never stamp a row older than (or equal to) what is already stored
-    updatedAt: existing ? Math.max(Date.now(), existing.updatedAt + 1) : Date.now(),
-    deviceId,
-    deleted: obj.deleted ?? false,
-  } as unknown as T;
-  await tbl(table).put(row as never);
-  return row;
+  // read + write in one transaction so a sync apply can't land between them
+  return db.transaction('rw', [tbl(table), db.meta], async () => {
+    const deviceId = await getDeviceId();
+    const existing = obj.id ? await tbl(table).get(id) : undefined;
+    const row = {
+      ...obj,
+      id,
+      // monotonic: never stamp a row older than (or equal to) what is already stored
+      updatedAt: existing ? Math.max(Date.now(), existing.updatedAt + 1) : Date.now(),
+      deviceId,
+      deleted: obj.deleted ?? false,
+    } as unknown as T;
+    await tbl(table).put(row as never);
+    return row;
+  });
 }
 
 export async function softDelete(table: SyncedTable, id: string): Promise<void> {
-  const t = tbl(table);
-  const row = await t.get(id);
-  if (!row) return;
-  await t.put({
-    ...row,
-    deleted: true,
-    updatedAt: Math.max(Date.now(), row.updatedAt + 1),
-    deviceId: await getDeviceId(),
+  await db.transaction('rw', [tbl(table), db.meta], async () => {
+    const t = tbl(table);
+    const row = await t.get(id);
+    if (!row) return;
+    await t.put({
+      ...row,
+      deleted: true,
+      updatedAt: Math.max(Date.now(), row.updatedAt + 1),
+      deviceId: await getDeviceId(),
+    });
   });
 }
 

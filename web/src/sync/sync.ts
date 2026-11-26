@@ -4,7 +4,7 @@ import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
 import type { Base } from '../domain/types';
 import { AuthNeeded, Offline, currentEmail, getAccessToken } from './auth';
-import { ensureFolder, findFile, getVersion, readJson, writeJson } from './drive';
+import { ensureFolder, findFile, findFolder, getVersion, listFiles, readJson, writeJson } from './drive';
 import { LEDGER_TABLES, emptyLedger, merge, parseLedger, wins, canonical, type Ledger, type LedgerTable } from './merge';
 
 export type SyncStatusCode = 'ok' | 'offline' | 'authNeeded' | 'error';
@@ -17,12 +17,14 @@ export interface SyncState {
   revision: number;
   message?: string;
 }
-export interface LedgerRef { folderId: string; fileId: string | null }
+/** createdHere: this phone created the file (so it re-checks that no older ledger exists). */
+export interface LedgerRef { folderId: string; fileId: string | null; createdHere?: boolean }
 
 export const FOLDER_NAME = 'Restaurant Accounts';
 export const LEDGER_NAME = 'ledger.json';
 const MAX_ATTEMPTS = 3;
 const DEBOUNCE_MS = 5000;
+const RETRY_MS = [30_000, 120_000, 600_000];
 
 // ---------------- status store ----------------
 let state: SyncState = { status: 'idle', at: null, running: false, revision: 0 };
@@ -51,7 +53,25 @@ export async function resolveLedgerRef(): Promise<LedgerRef> {
 }
 
 export async function setLedgerRef(ref: LedgerRef): Promise<void> {
-  await db.meta.put({ key: 'ledgerRef', value: ref });
+  const value: LedgerRef = { folderId: ref.folderId, fileId: ref.fileId };
+  if (ref.createdHere) value.createdHere = true;
+  await db.meta.put({ key: 'ledgerRef', value });
+}
+
+/**
+ * The canonical ledger is the oldest ledger.json in the oldest "Restaurant Accounts" folder.
+ * For a ledger this phone created, returns that canonical one if it is a different file
+ * (another phone created theirs at the same time and it was not listed yet), else null.
+ */
+async function olderLedger(ref: LedgerRef): Promise<LedgerRef | null> {
+  const folder = await findFolder(FOLDER_NAME);
+  if (folder && folder !== ref.folderId) {
+    const f = await findFile(LEDGER_NAME, folder);
+    if (f && f.id !== ref.fileId) return { folderId: folder, fileId: f.id };
+  }
+  const f = await findFile(LEDGER_NAME, ref.folderId);
+  if (f && f.id !== ref.fileId) return { folderId: ref.folderId, fileId: f.id };
+  return null;
 }
 
 // ---------------- local read / apply ----------------
@@ -97,7 +117,11 @@ async function applyMerged(merged: Ledger): Promise<Set<LedgerTable>> {
 async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
   await getAccessToken(); // fail fast with AuthNeeded / Offline before touching anything
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const ref = await resolveLedgerRef();
+    let ref = await resolveLedgerRef();
+    if (ref.fileId && ref.createdHere) {
+      const older = await olderLedger(ref);
+      if (older) { await setLedgerRef(older); ref = older; }
+    }
     const local = await readLocal();
     let remote: Ledger | null = null;
     let readVersion: string | null = null;
@@ -122,10 +146,19 @@ async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
         continue; // the other phone created it meanwhile: merge with theirs instead of making a second one
       }
       const w = await writeJson(ref.fileId, LEDGER_NAME, ref.folderId, merged);
+      if (!ref.fileId) {
+        // we just created ledger.json: if another phone made one at the same time, the oldest wins
+        const oldest = (await listFiles(LEDGER_NAME, ref.folderId, 2))[0];
+        if (oldest && oldest.id !== w.id) {
+          await setLedgerRef({ folderId: ref.folderId, fileId: oldest.id });
+          continue; // re-read theirs and merge our rows into it
+        }
+        ref = { ...ref, createdHere: true };
+      }
       version = w.version;
       fileId = w.id;
     }
-    await setLedgerRef({ folderId: ref.folderId, fileId });
+    await setLedgerRef({ ...ref, fileId });
     const changed = await applyMerged(merged);
     const at = Date.now();
     await db.meta.put({ key: 'lastSync', value: { at, version } });
@@ -160,6 +193,7 @@ export function syncNow(): Promise<SyncResult> {
     const result: SyncResult = { ...r, at: r.at ?? Date.now() };
     running = null;
     setState({ running: false, status: result.status, at: result.at, message: result.message });
+    planRetry(result.status);
     return result;
   })();
   running = p;
@@ -182,9 +216,34 @@ export function scheduleSync(): void {
 /** test helper: is a debounced sync armed? */
 export const _pendingSync = (): boolean => timer !== null;
 
+// After 'offline' / 'error', one retry with backoff (30 s, 2 min, then 10 min) until a sync succeeds.
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryDelay: number | null = null;
+let retryCount = 0;
+
+function clearRetry(): void {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  retryDelay = null;
+}
+
+function planRetry(status: SyncStatusCode): void {
+  if (!onOnline) return; // only once the app started sync (startSync)
+  clearRetry();
+  if (status !== 'offline' && status !== 'error') { retryCount = 0; return; }
+  const delay = RETRY_MS[Math.min(retryCount, RETRY_MS.length - 1)];
+  retryCount++;
+  retryDelay = delay;
+  retryTimer = setTimeout(() => { retryTimer = null; retryDelay = null; void syncNow(); }, delay);
+}
+
+/** test helper: the armed retry's delay, or null. */
+export const _retryDelay = (): number | null => retryDelay;
+
 type HookFn = (...args: any[]) => void;
 const hooks: { table: Table<Base, string>; type: 'creating' | 'updating' | 'deleting'; fn: HookFn }[] = [];
 let onOnline: (() => void) | null = null;
+let onVisible: (() => void) | null = null;
 
 async function syncIfSignedIn(): Promise<void> {
   if (await currentEmail()) void syncNow();
@@ -209,6 +268,11 @@ export async function startSync(): Promise<void> {
   }
   onOnline = () => { void syncIfSignedIn(); };
   window.addEventListener('online', onOnline);
+  onVisible = () => {
+    if (document.visibilityState !== 'visible') return;
+    void currentEmail().then((e) => { if (e) scheduleSync(); }, () => {});
+  };
+  document.addEventListener('visibilitychange', onVisible);
   const last = (await db.meta.get('lastSync'))?.value as { at: number } | undefined;
   if (last && state.status === 'idle') setState({ status: 'ok', at: last.at });
   await syncIfSignedIn();
@@ -218,7 +282,11 @@ export async function startSync(): Promise<void> {
 export function stopSync(): void {
   for (const h of hooks.splice(0)) (h.table.hook as any)(h.type).unsubscribe(h.fn);
   if (onOnline) window.removeEventListener('online', onOnline);
+  if (onVisible) document.removeEventListener('visibilitychange', onVisible);
   onOnline = null;
+  onVisible = null;
+  clearRetry();
+  retryCount = 0;
   if (timer) clearTimeout(timer);
   timer = null;
 }

@@ -25,11 +25,31 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
 
 const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
-export async function ensureFolder(name: string, parentId?: Id): Promise<Id> {
+/** Lists by query, oldest first (orderBy createdTime), so every phone agrees on which one is canonical. */
+async function listOldest(q: string, fields: string, pageSize: number): Promise<Record<string, string>[]> {
+  const params = new URLSearchParams({ q, fields: `files(${fields})`, pageSize: String(pageSize), orderBy: 'createdTime' });
+  const r = await (await driveFetch(`${API}/files?${params}`)).json();
+  return r.files ?? [];
+}
+
+const folderQuery = (name: string, parentId?: Id) => {
   let q = `name='${esc(name)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
   if (parentId) q += ` and '${esc(parentId)}' in parents`;
-  const found = await (await driveFetch(`${API}/files?${new URLSearchParams({ q, fields: 'files(id)', pageSize: '1' })}`)).json();
-  if (found.files?.length) return found.files[0].id;
+  return q;
+};
+
+/** The oldest folder with this name, or null. */
+export async function findFolder(name: string, parentId?: Id): Promise<Id | null> {
+  return (await listOldest(folderQuery(name, parentId), 'id', 1))[0]?.id ?? null;
+}
+
+/**
+ * The oldest folder with this name; creates it when missing. After creating, re-lists: if another
+ * phone created one at the same time and theirs is older, theirs is returned.
+ */
+export async function ensureFolder(name: string, parentId?: Id): Promise<Id> {
+  const found = await findFolder(name, parentId);
+  if (found) return found;
   const body: Record<string, unknown> = { name, mimeType: FOLDER_MIME };
   if (parentId) body.parents = [parentId];
   const created = await (await driveFetch(`${API}/files?fields=id`, {
@@ -37,13 +57,19 @@ export async function ensureFolder(name: string, parentId?: Id): Promise<Id> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })).json();
-  return created.id;
+  const again = await listOldest(folderQuery(name, parentId), 'id', 2);
+  return again[0]?.id ?? created.id;
 }
 
-export async function findFile(name: string, parentId: Id): Promise<{ id: string; version: string } | null> {
+/** Files with this name in the folder, oldest first, at most pageSize. */
+export async function listFiles(name: string, parentId: Id, pageSize = 1): Promise<{ id: string; version: string }[]> {
   const q = `name='${esc(name)}' and '${esc(parentId)}' in parents and trashed=false`;
-  const r = await (await driveFetch(`${API}/files?${new URLSearchParams({ q, fields: 'files(id,version)', pageSize: '1' })}`)).json();
-  return r.files?.length ? { id: r.files[0].id, version: r.files[0].version } : null;
+  return (await listOldest(q, 'id,version', pageSize)).map((f) => ({ id: f.id, version: f.version }));
+}
+
+/** The oldest file with this name in the folder, or null. */
+export async function findFile(name: string, parentId: Id): Promise<{ id: string; version: string } | null> {
+  return (await listFiles(name, parentId, 1))[0] ?? null;
 }
 
 /** Cheap metadata-only read of a file's version (used right before writing). */

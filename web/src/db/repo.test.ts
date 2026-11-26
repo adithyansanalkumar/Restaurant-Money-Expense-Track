@@ -53,6 +53,22 @@ describe('repo', () => {
     expect(a.updatedAt).toBe(7000);
   });
 
+  it('put and softDelete read+write inside one rw transaction over the table and meta', async () => {
+    const seen: string[][] = [];
+    const rec = (...a: any[]) => { const tx = a[a.length - 1]; seen.push([tx?.mode, ...[...(tx?.storeNames ?? [])].sort()]); };
+    db.suppliers.hook('creating', rec);
+    db.suppliers.hook('updating', rec);
+    try {
+      await put<Supplier>('suppliers', { id: 's1', name: 'Farm' });
+      await put<Supplier>('suppliers', { id: 's1', name: 'Farm 2' });
+      await softDelete('suppliers', 's1');
+    } finally {
+      db.suppliers.hook('creating').unsubscribe(rec);
+      db.suppliers.hook('updating').unsubscribe(rec);
+    }
+    expect(seen).toEqual([['readwrite', 'meta', 'suppliers'], ['readwrite', 'meta', 'suppliers'], ['readwrite', 'meta', 'suppliers']]);
+  });
+
   it('seedDefaults twice creates 14 expense categories and 5 income channels once', async () => {
     await seedDefaults();
     await seedDefaults();

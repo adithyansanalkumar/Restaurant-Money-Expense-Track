@@ -14,6 +14,8 @@ vi.mock('../sync/auth', async (orig) => ({
 vi.mock('../sync/drive', () => ({
   ensureFolder: vi.fn(async () => 'folder1'),
   findFile: vi.fn(async () => null),
+  findFolder: vi.fn(async () => 'folder1'),
+  listFiles: vi.fn(async () => [{ id: 'ledger1', version: '1' }]),
   readJson: vi.fn(),
   getVersion: vi.fn(),
   writeJson: vi.fn(async () => ({ id: 'ledger1', version: '1' })),
