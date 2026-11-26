@@ -94,3 +94,25 @@ test('grid lists photos and the viewer links to the expense', async () => {
   expect(getEditing()?.id).toBe('e1');
   expect(onGo).toHaveBeenCalledWith('add');
 });
+
+test('closing the check screen returns to the grid', async () => {
+  vi.mocked(readBill).mockResolvedValue(TEXT);
+  render(<Bills onGo={vi.fn()} />);
+  pick();
+  await screen.findByText('Check the details');
+  fireEvent.click(screen.getByLabelText('Close'));
+  await waitFor(() => expect(screen.queryByText('Check the details')).toBeNull());
+  expect(await screen.findAllByTestId('bill-thumb')).toHaveLength(1);
+});
+
+test('Retake opens the picker synchronously in the tap', async () => {
+  vi.mocked(readBill).mockResolvedValue(TEXT);
+  const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+  render(<Bills onGo={vi.fn()} />);
+  pick();
+  await screen.findByText('Check the details');
+  click.mockClear();
+  fireEvent.click(screen.getByText('Retake'));
+  expect(click).toHaveBeenCalledTimes(1);
+  click.mockRestore();
+});

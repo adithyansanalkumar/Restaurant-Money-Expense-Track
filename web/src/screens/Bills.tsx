@@ -61,12 +61,13 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
     }
   };
 
-  const retake = async () => {
-    if (checking) await deletePhoto(checking.photoId);
+  const retake = () => {
+    input.current?.click(); // synchronously, inside the tap: iOS blocks pickers opened after an await
+    const old = checking;
     setChecking(null);
-    await load();
-    input.current?.click();
+    void (async () => { if (old) await deletePhoto(old.photoId); await load(); })();
   };
+  const closeCheck = () => { setChecking(null); void load(); };
 
   const saveAll = async () => {
     try { const n = await saveAllPhotos(); setNotice(t('bills.savedAll', { n })); } catch { setNotice(t('bills.saveError')); }
@@ -83,7 +84,7 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
       <>
         {picker}
         <BillCheck photoId={checking.photoId} photoUrl={checking.url} parsed={checking.parsed} suppliers={checking.suppliers}
-          ocrFailed={checking.ocrFailed} onRetake={() => void retake()} onGo={onGo} />
+          ocrFailed={checking.ocrFailed} onRetake={retake} onClose={closeCheck} onGo={onGo} />
       </>
     );
   }

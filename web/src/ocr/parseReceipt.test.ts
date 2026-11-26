@@ -54,6 +54,13 @@ describe('parseReceipt', () => {
   });
 });
 
+describe('O-for-zero only next to digits', () => {
+  it('does not turn words containing O into zeros', () => {
+    expect(parseReceipt('BIO 12,50\nTOTAL TTC EURO 184,50\n', 'fra', []).incl).toBe(18450);
+    expect(parseReceipt('TOTAL TTC 1O4,5O\n', 'fra', []).incl).toBe(10450);
+  });
+});
+
 describe('matchSupplier', () => {
   it('ignores case, accents, punctuation, spaces and matches prefixes', () => {
     expect(matchSupplier('METRO CASH & CARRY', suppliers)?.id).toBe('s1');

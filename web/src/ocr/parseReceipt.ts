@@ -41,12 +41,22 @@ const KEYWORDS: { re: RegExp; kind: Kind; score: number }[] = [
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
 
 // A money token: digits (or an OCR 'O' for 0), optional separators, and a 2-digit decimal part.
-const AMOUNT_RE = /(?:[\dO][\dO., ]*)?[\dO][.,][\dO]{2}(?![\dO])/g;
+const AMOUNT_RE = /(?:\d[\d., ]*)?\d[.,]\d{2}(?!\d)/g;
+
+/** Read an 'O' as 0 only when touching a digit (or another such O), e.g. "1O,5O"; "BIO" and "EURO" stay words. */
+function fixZeros(line: string): string {
+  let prev = line;
+  for (;;) {
+    const next = prev.replace(/(?<=\d)O|O(?=\d)/g, '0');
+    if (next === prev) return next;
+    prev = next;
+  }
+}
 
 function lastAmount(line: string): Cents | undefined {
-  const toks = (line.match(AMOUNT_RE) ?? []).filter((x) => /\d/.test(x));
+  const toks = fixZeros(line).match(AMOUNT_RE) ?? [];
   for (let i = toks.length - 1; i >= 0; i--) {
-    const c = parseAmount(toks[i].replace(/O/g, '0').trim());
+    const c = parseAmount(toks[i].trim());
     if (c !== null) return c;
   }
   return undefined;

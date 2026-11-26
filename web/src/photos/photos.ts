@@ -1,5 +1,6 @@
 import { db } from '../db/db';
 import type { Id } from '../domain/types';
+import { t } from '../i18n';
 import { shareOrDownload } from '../export/share';
 
 export function fitWithin(w: number, h: number, maxEdge: number): { width: number; height: number } {
@@ -67,7 +68,7 @@ export async function saveAllPhotos(): Promise<number> {
   const files = rows.map((r, i) => new File([r.blob], fileName(r.createdAt, i + 1), { type: r.blob.type || 'image/jpeg' }));
   if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' && navigator.canShare?.({ files })) {
     try {
-      await navigator.share({ files, title: 'Bills' });
+      await navigator.share({ files, title: t('bills.title') });
       return rows.length;
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return rows.length;

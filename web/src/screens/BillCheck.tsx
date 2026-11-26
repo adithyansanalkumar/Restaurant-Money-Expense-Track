@@ -20,9 +20,9 @@ const field = (state: 'read' | 'missing' | 'plain'): CSSProperties => ({
 });
 
 /** Review what was read from a bill photo, fix it, then hand off to the add-expense screen. */
-export function BillCheck({ photoId, photoUrl, parsed, suppliers, ocrFailed, onRetake, onGo }: {
+export function BillCheck({ photoId, photoUrl, parsed, suppliers, ocrFailed, onRetake, onClose, onGo }: {
   photoId: Id; photoUrl?: string; parsed: ParsedReceipt; suppliers: Supplier[]; ocrFailed?: boolean;
-  onRetake: () => void; onGo: (r: Route) => void;
+  onRetake: () => void; onClose: () => void; onGo: (r: Route) => void;
 }) {
   useLanguage();
   const { shared } = useSettings();
@@ -67,7 +67,7 @@ export function BillCheck({ photoId, photoUrl, parsed, suppliers, ocrFailed, onR
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 25, background: 'radial-gradient(70% 45% at 50% 30%,#3a3630 0,#1d1b18 70%,#121110 100%)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16 }}>
-        <button type="button" className="glass" aria-label={t('bills.close')} onClick={() => onGo('bills')}
+        <button type="button" className="glass" aria-label={t('bills.close')} onClick={onClose}
           style={{ width: 44, height: 44, borderRadius: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFFFFF' }}>
           <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
