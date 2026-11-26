@@ -8,6 +8,7 @@ import type { Category, Entry, Payment, Supplier } from '../domain/types';
 import { db } from '../db/db';
 import { listLive, softDelete } from '../db/repo';
 import { t, useLanguage } from '../i18n';
+import { PhotoViewer } from './PhotoViewer';
 
 const IN = '#6FE3A0';
 const OUT = '#FF8E8E';
@@ -20,6 +21,7 @@ export function History({ onGo }: { onGo: (r: Route) => void }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState<Entry | null>(null);
+  const [photo, setPhoto] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [e, s, c] = await Promise.all([listLive<Entry>('entries'), listLive<Supplier>('suppliers'), listLive<Category>('categories')]);
@@ -83,6 +85,11 @@ export function History({ onGo }: { onGo: (r: Route) => void }) {
                   {fallback && <span data-testid="incl-tag" style={{ fontSize: 11, color: '#A9BED0' }}>{t('tax.inclTag')}</span>}
                 </span>
               </button>
+              {e.photoId && (
+                <button type="button" aria-label={t('bills.viewPhoto')} onClick={() => setPhoto(e.photoId!)} style={{ width: 44, height: 44, border: 0, background: 'transparent', color: '#8FD8F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+                </button>
+              )}
               <button type="button" aria-label={t('history.delete')} onClick={() => setPending(e)} style={{ width: 44, height: 44, border: 0, background: 'transparent', color: '#C6D8E6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
               </button>
@@ -90,6 +97,8 @@ export function History({ onGo }: { onGo: (r: Route) => void }) {
           );
         })}
       </Glass>
+
+      {photo && <PhotoViewer photoId={photo} onClose={() => setPhoto(null)} onGo={onGo} />}
 
       {pending && (
         <div role="dialog" aria-modal="true" aria-label={t('history.deleteConfirm')} onClick={() => setPending(null)}

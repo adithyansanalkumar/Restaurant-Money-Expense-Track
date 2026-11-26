@@ -1,0 +1,9 @@
+Bay Dry Goods
+14 High St
+
+25.11.26 14:03
+Rice 20kg           40.00
+Flour 25kg          30.00
+SUBTOTAL            70.00
+VAT 20%             14.00
+TOTAL               84.00

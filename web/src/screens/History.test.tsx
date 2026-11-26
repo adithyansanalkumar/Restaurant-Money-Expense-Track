@@ -82,3 +82,17 @@ test('excl view marks only rows that fell back to the incl amount', async () => 
   expect(screen.getAllByTestId('incl-tag')).toHaveLength(1);
   expect(within(screen.getAllByTestId('history-row')[1]).getByTestId('incl-tag')).toBeTruthy();
 });
+
+test('rows with a photo show a camera button that opens the viewer', async () => {
+  vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }));
+  await put<Supplier>('suppliers', { id: 's1', name: 'Metro' });
+  await db.photos.add({ id: 'ph1', blob: new Blob(['a']), createdAt: 1, backedUp: false });
+  await put<Entry>('entries', entry('e1', { supplierId: 's1', photoId: 'ph1' }));
+  await put<Entry>('entries', entry('e2', { supplierId: 's1' }));
+  render(<History onGo={vi.fn()} />);
+  await screen.findAllByTestId('history-row');
+  const btns = screen.getAllByLabelText('View bill photo');
+  expect(btns).toHaveLength(1);
+  fireEvent.click(btns[0]);
+  expect(await screen.findByText('Save to phone')).toBeInTheDocument();
+});
