@@ -6,7 +6,10 @@ export class AuthNeeded extends Error {
 export class Offline extends Error {
   constructor(message = 'Network unavailable') { super(message); this.name = 'Offline'; }
 }
-/** Google still gave no refresh token after the one consent retry. */
+/**
+ * Google gave no refresh token; the worker revoked the grant so Google asks for consent next time.
+ * The UI shows "Please approve access again" and signs in again from a tap (popups need one).
+ */
 export class ConsentRequired extends Error {
   constructor(message = 'Access was not approved') { super(message); this.name = 'ConsentRequired'; }
 }
@@ -16,8 +19,6 @@ export class EmailMismatch extends Error {
 }
 
 export interface SignInOptions {
-  /** Called when Google must be asked for consent again (the app shows "Please approve access again"). */
-  onConsentRetry?: () => void;
   /** Only accept this account (Forgot PIN). A different one is revoked and EmailMismatch thrown. */
   expectEmail?: string;
 }
@@ -107,13 +108,8 @@ export async function signIn(opts: SignInOptions = {}): Promise<{ email: string 
     throw new Error('Sign-in is not configured: set VITE_GOOGLE_CLIENT_ID and VITE_AUTH_URL');
   }
   await loadGis();
-  let res = await post('/exchange', { code: await requestCode(clientId) });
-  if (res.status === 409) {
-    // The worker revoked the grant (Google sent no refresh token); Google asks for consent again.
-    opts.onConsentRetry?.();
-    res = await post('/exchange', { code: await requestCode(clientId) });
-    if (res.status === 409) throw new ConsentRequired();
-  }
+  const res = await post('/exchange', { code: await requestCode(clientId) });
+  if (res.status === 409) throw new ConsentRequired();
   if (!res.ok) throw new Error('Sign-in failed');
   const d = await res.json() as { session: string; accessToken: string; expiresIn: number; email: string };
   if (opts.expectEmail && !sameEmail(d.email, opts.expectEmail)) {

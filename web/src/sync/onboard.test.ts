@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../db/db';
-import { reloadSettings } from '../settings/store';
+import { reloadSettings, saveShared } from '../settings/store';
 import type { Ledger } from './merge';
 
 const files = new Map<string, { data: unknown; version: number }>();
@@ -20,7 +20,8 @@ const drive = {
   }),
 };
 vi.mock('./drive', () => Object.fromEntries(['ensureFolder', 'findFolder', 'listFiles', 'findFile', 'readJson', 'getVersion', 'writeJson'].map((k) => [k, (...a: unknown[]) => (drive as any)[k](...a)])));
-vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: async () => 'TOK', currentEmail: async () => 'dad@x.com' }));
+const signOut = vi.fn(async () => {});
+vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: async () => 'TOK', currentEmail: async () => 'dad@x.com', signOut: () => signOut() }));
 
 import { adoptExistingLedger } from './onboard';
 import { stopSync } from './sync';
@@ -37,6 +38,7 @@ beforeEach(async () => {
   await reloadSettings();
   files.clear();
   for (const f of Object.values(drive)) f.mockClear();
+  signOut.mockClear();
   drive.findFolder.mockImplementation(async () => null);
   drive.findFile.mockImplementation(async () => null);
 });
@@ -70,5 +72,33 @@ describe('adoptExistingLedger (same account, new phone)', () => {
     drive.readJson.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'Offline' }));
     expect(await adoptExistingLedger()).toBe('offline');
     expect(await db.settings.get('shared')).toBeUndefined();
+  });
+});
+
+describe('a "Not now" phone signing in later', () => {
+  const localData = async () => {
+    await saveShared({ restaurantName: 'Local', country: 'FR', currency: 'EUR' });
+    await db.entries.put({ id: 'offline1', updatedAt: 50, deviceId: 'me', deleted: false, kind: 'expense', date: '2026-11-01', amountIncl: 700, categoryId: 'c', method: 'cash', createdBy: '' } as any);
+  };
+  it('a ledger exists: the local shared row is removed raw first; the owner\'s settings survive and local entries merge in', async () => {
+    await localData();
+    files.set('L', { data: ledger, version: 9 });
+    drive.findFolder.mockResolvedValue('F');
+    drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
+    expect(await adoptExistingLedger()).toBe('adopted');
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Chez Dad', updatedAt: 5, deleted: false });
+    const pushed = files.get('L')!.data as Ledger;
+    expect(pushed.settings).toEqual(ledger.settings);
+    expect(pushed.entries.map((e) => e.id)).toEqual(['offline1']);
+  });
+  it('the sync fails: the local row is restored and the phone is signed out (no later sync can push it)', async () => {
+    await localData();
+    drive.findFolder.mockResolvedValue('F');
+    drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
+    drive.readJson.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'Offline' }));
+    expect(await adoptExistingLedger()).toBe('offline');
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Local' });
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(signOut).toHaveBeenCalled();
   });
 });

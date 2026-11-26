@@ -72,19 +72,18 @@ test('a ledger exists but the sync failed: stays on Welcome with an error, never
   expect(screen.queryByText('Set up your restaurant')).toBeNull();
 });
 
-test('consent retry shows "Please approve access again"', async () => {
-  let release!: () => void;
-  auth.signIn.mockImplementation(async (o: { onConsentRetry?: () => void }) => {
-    o?.onConsentRetry?.();
-    await new Promise<void>((r) => { release = r; });
-    return { email: 'dad@x.com' };
-  });
+test('consent_required: shows "Please approve access again" and a Continue with Google button that signs in from the tap', async () => {
+  const { ConsentRequired } = await import('../sync/auth');
+  auth.signIn.mockRejectedValueOnce(new ConsentRequired());
   adopt.mockResolvedValue('none');
   render(<App />);
   fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
   expect(await screen.findByText('Please approve access again')).toBeTruthy();
-  release();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(auth.signIn).toHaveBeenCalledTimes(1); // not reopened automatically
+  fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
   expect(await screen.findByText('Set up your restaurant')).toBeTruthy();
+  expect(auth.signIn).toHaveBeenCalledTimes(2);
 });
 
 test('a failed sign-in shows an error and stays on Welcome', async () => {

@@ -1,23 +1,28 @@
 import { useCallback, useState } from 'react';
 import { signIn, type SignInOptions } from '../sync/auth';
-import { t } from '../i18n';
+
+export const isConsentRequired = (e: unknown) => (e as Error | undefined)?.name === 'ConsentRequired';
 
 /**
- * signIn() for screens: tracks busy, and shows "Please approve access again" while Google is
- * asked for consent a second time (the worker got no refresh token).
+ * signIn() for screens: tracks busy, and `consent` = Google must be asked again (the worker got
+ * no refresh token). Then show <ConsentNotice>: its button signs in again from the user's tap,
+ * because browsers block popups opened without one. run() still throws; callers ignore
+ * ConsentRequired (isConsentRequired) instead of showing a generic error.
  */
 export function useSignIn() {
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const run = useCallback(async (opts: Omit<SignInOptions, 'onConsentRetry'> = {}) => {
+  const [consent, setConsent] = useState(false);
+  const run = useCallback(async (opts: SignInOptions = {}) => {
     setBusy(true);
-    setNotice(null);
+    setConsent(false);
     try {
-      return await signIn({ ...opts, onConsentRetry: () => setNotice(t('auth.reconsent')) });
+      return await signIn(opts);
+    } catch (e) {
+      if (isConsentRequired(e)) setConsent(true);
+      throw e;
     } finally {
       setBusy(false);
-      setNotice(null);
     }
   }, []);
-  return { run, busy, notice };
+  return { run, busy, consent };
 }

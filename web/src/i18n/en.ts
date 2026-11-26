@@ -224,6 +224,7 @@ export const en = {
   'lock.checkFailed': "Couldn’t check the lock — reopen the app.",
   'auth.reconsent': "Please approve access again",
   'auth.signIn': "Sign in with Google",
+  'auth.continueGoogle': "Continue with Google",
   'auth.signedInAs': "Signed in as {email}",
   'auth.signOut': "Sign out",
   'auth.error': "Could not sign in. Please try again.",

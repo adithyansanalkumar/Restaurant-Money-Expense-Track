@@ -226,6 +226,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'lock.checkFailed': "Impossible de vérifier le verrou — rouvrez l’application.",
   'auth.reconsent': "Veuillez autoriser l’accès à nouveau",
   'auth.signIn': "Se connecter avec Google",
+  'auth.continueGoogle': "Continuer avec Google",
   'auth.signedInAs': "Connecté en tant que {email}",
   'auth.signOut': "Se déconnecter",
   'auth.error': "Connexion impossible. Réessayez.",

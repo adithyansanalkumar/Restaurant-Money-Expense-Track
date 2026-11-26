@@ -141,21 +141,16 @@ describe('sign-in hardening', () => {
   });
   const ok = (session: string, email: string) => json({ session, accessToken: 'AT-' + session, expiresIn: 3600, email });
 
-  it('409 consent_required: tells the caller, re-runs the code flow once and succeeds', async () => {
-    const onConsentRetry = vi.fn();
-    fetchMock.mockResolvedValueOnce(json({ error: 'consent_required' }, 409)).mockResolvedValueOnce(ok('S1', 'a@b.com'));
-    expect(await signIn({ onConsentRetry })).toEqual({ email: 'a@b.com' });
-    expect(onConsentRetry).toHaveBeenCalledTimes(1);
+  it('409 consent_required throws ConsentRequired without reopening the popup (needs a new tap)', async () => {
+    fetchMock.mockResolvedValueOnce(json({ error: 'consent_required' }, 409));
+    await expect(signIn()).rejects.toBeInstanceOf(ConsentRequired);
+    expect(requests).toBe(1);
+    expect(await db.meta.get('auth')).toBeUndefined();
+    // the next tap runs a fresh code flow and succeeds
+    fetchMock.mockResolvedValueOnce(ok('S1', 'a@b.com'));
+    expect(await signIn()).toEqual({ email: 'a@b.com' });
     expect(requests).toBe(2);
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ code: 'C2' });
-    expect((await db.meta.get('auth'))?.value).toEqual({ session: 'S1', email: 'a@b.com' });
-  });
-
-  it('a second 409 throws ConsentRequired and stores nothing', async () => {
-    fetchMock.mockResolvedValue(json({ error: 'consent_required' }, 409));
-    await expect(signIn()).rejects.toBeInstanceOf(ConsentRequired);
-    expect(requests).toBe(2);
-    expect(await db.meta.get('auth')).toBeUndefined();
   });
 
   it('re-sign-in revokes the old session before storing the new one', async () => {

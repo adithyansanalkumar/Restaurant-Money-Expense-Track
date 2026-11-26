@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Glass } from '../ui/Glass';
 import { t, useLanguage } from '../i18n';
 import { primaryBtn } from '../lock/PinPad';
-import { useSignIn } from '../ui/useSignIn';
+import { isConsentRequired, useSignIn } from '../ui/useSignIn';
+import { ConsentNotice } from '../ui/ConsentNotice';
 import { adoptExistingLedger } from '../sync/onboard';
 import { errorText, iconTile, mutedText, noticeText, screenCol, screenTitle, secondaryBtn } from '../ui/styles';
 
@@ -13,7 +14,7 @@ import { errorText, iconTile, mutedText, noticeText, screenCol, screenTitle, sec
  */
 export function Welcome({ onSetup, onDone }: { onSetup: () => void; onDone: () => void }) {
   useLanguage();
-  const { run, busy, notice } = useSignIn();
+  const { run, busy, consent } = useSignIn();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,8 +23,8 @@ export function Welcome({ onSetup, onDone }: { onSetup: () => void; onDone: () =
     setError(null);
     try {
       await run();
-    } catch {
-      setError(t('auth.error'));
+    } catch (e) {
+      if (!isConsentRequired(e)) setError(t('auth.error'));
       return;
     }
     setChecking(true);
@@ -48,7 +49,7 @@ export function Welcome({ onSetup, onDone }: { onSetup: () => void; onDone: () =
       <div style={{ ...mutedText, fontSize: 14, marginTop: -6 }}>{t('welcome.subtitle')}</div>
       <Glass style={{ alignSelf: 'stretch', borderRadius: 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <button type="button" style={primaryBtn} disabled={busy || checking} onClick={() => void start()}>{t('auth.signIn')}</button>
-        {notice && <div role="status" style={noticeText}>{notice}</div>}
+        {consent && <ConsentNotice disabled={busy || checking} onContinue={() => void start()} />}
         {checking && <div role="status" style={noticeText}>{t('welcome.checking')}</div>}
         {error && <div role="alert" style={errorText}>{error}</div>}
         <button type="button" style={secondaryBtn} disabled={busy || checking} onClick={onSetup}>{t('welcome.notNow')}</button>

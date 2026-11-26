@@ -7,12 +7,15 @@ import { reloadSettings, saveShared } from '../settings/store';
 
 const drive = vi.hoisted(() => ({ shareFolder: vi.fn(async () => {}), shareFile: vi.fn(async () => {}) }));
 vi.mock('../sync/drive', async (orig) => ({ ...(await orig<typeof import('../sync/drive')>()), ...drive }));
-const auth = vi.hoisted(() => ({ email: 'adi@x.com' as string | null, signOut: vi.fn(async () => {}) }));
+const auth = vi.hoisted(() => ({ email: 'adi@x.com' as string | null, signOut: vi.fn(async () => {}), signIn: vi.fn() }));
 vi.mock('../sync/auth', async (orig) => ({
   ...(await orig<typeof import('../sync/auth')>()),
   currentEmail: async () => auth.email,
   signOut: () => auth.signOut(),
+  signIn: (o?: unknown) => auth.signIn(o),
 }));
+const adopt = vi.hoisted(() => vi.fn());
+vi.mock('../sync/onboard', () => ({ adoptExistingLedger: () => adopt() }));
 
 import { SharePanel } from './SharePanel';
 
@@ -56,4 +59,39 @@ test('Sign out calls signOut', async () => {
   render(<SharePanel />);
   fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
   await waitFor(() => expect(auth.signOut).toHaveBeenCalled());
+});
+
+test('signing in later with no remote ledger makes this phone the owner (ownerEmail set)', async () => {
+  await saveShared({ restaurantName: 'Local' });
+  auth.email = null;
+  auth.signIn.mockImplementation(async () => { auth.email = 'adi@x.com'; return { email: 'adi@x.com' }; });
+  adopt.mockResolvedValue('none');
+  render(<SharePanel />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  await waitFor(async () => expect((await db.settings.get('shared'))?.ownerEmail).toBe('adi@x.com'));
+  expect(await screen.findByText('Share with someone')).toBeTruthy();
+});
+
+test('signing in later when a remote ledger exists never writes shared settings', async () => {
+  await saveShared({ restaurantName: 'Local' });
+  auth.email = null;
+  auth.signIn.mockImplementation(async () => { auth.email = 'adi@x.com'; return { email: 'adi@x.com' }; });
+  adopt.mockResolvedValue('adopted');
+  const before = await db.settings.get('shared');
+  render(<SharePanel />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  await waitFor(() => expect(adopt).toHaveBeenCalled());
+  await screen.findByText('Signed in as adi@x.com');
+  expect(await db.settings.get('shared')).toEqual(before);
+});
+
+test('sign-in that fails to load the remote ledger shows an error', async () => {
+  await saveShared({ restaurantName: 'Local' });
+  auth.email = null;
+  auth.signIn.mockImplementation(async () => { auth.email = 'adi@x.com'; return { email: 'adi@x.com' }; });
+  adopt.mockImplementation(async () => { auth.email = null; return 'offline'; });
+  render(<SharePanel />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect((await db.settings.get('shared'))?.ownerEmail).toBeUndefined();
 });

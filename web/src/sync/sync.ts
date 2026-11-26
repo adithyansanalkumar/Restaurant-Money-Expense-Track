@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { Table, Transaction } from 'dexie';
 import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
-import type { Base } from '../domain/types';
+import type { Base, SharedSettings } from '../domain/types';
 import { AuthNeeded, Offline, currentEmail, getAccessToken, onAccountChange } from './auth';
 import { ensureFolder, findFile, findFolder, getVersion, listFiles, readJson, writeJson } from './drive';
 import { LEDGER_TABLES, emptyLedger, merge, parseLedger, wins, canonical, type Ledger, type LedgerTable } from './merge';
@@ -144,6 +144,35 @@ async function applyMerged(merged: Ledger): Promise<Set<LedgerTable>> {
     }
   });
   return changed;
+}
+
+/**
+ * Removes the local shared-settings row RAW (no tombstone, no restamp, sync hooks ignore it), so a
+ * ledger this phone is about to adopt or join keeps its owner's settings. Returns the removed row.
+ */
+export async function dropLocalShared(): Promise<SharedSettings | undefined> {
+  return db.transaction('rw', db.settings, async (tx) => {
+    applyingTx = tx;
+    try {
+      const row = await db.settings.get('shared');
+      if (row) await db.settings.delete('shared');
+      return row;
+    } finally {
+      applyingTx = null;
+    }
+  });
+}
+
+/** Puts back a row removed by dropLocalShared (raw, as it was), unless a shared row arrived since. */
+export async function restoreLocalShared(row: SharedSettings): Promise<void> {
+  await db.transaction('rw', db.settings, async (tx) => {
+    applyingTx = tx;
+    try {
+      if (!(await db.settings.get('shared'))) await db.settings.put(row);
+    } finally {
+      applyingTx = null;
+    }
+  });
 }
 
 // ---------------- sync ----------------

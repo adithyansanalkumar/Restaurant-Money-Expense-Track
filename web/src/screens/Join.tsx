@@ -3,7 +3,8 @@ import { Glass } from '../ui/Glass';
 import type { Route } from '../ui/router';
 import { t, useLanguage } from '../i18n';
 import { primaryBtn } from '../lock/PinPad';
-import { useSignIn } from '../ui/useSignIn';
+import { isConsentRequired, useSignIn } from '../ui/useSignIn';
+import { ConsentNotice } from '../ui/ConsentNotice';
 import { currentEmail } from '../sync/auth';
 import { JOIN_MODE, NoLedger, openShared } from '../sync/share';
 import { db } from '../db/db';
@@ -16,7 +17,7 @@ const isNamed = (e: unknown, name: string) => (e as Error | undefined)?.name ===
 export function Join({ onGo }: { onGo: (r: Route) => void }) {
   useLanguage();
   const { device, saveDevice } = useSettings();
-  const { run, busy: signingIn, notice } = useSignIn();
+  const { run, busy: signingIn, consent } = useSignIn();
   const [email, setEmail] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +30,7 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
 
   const doSignIn = async () => {
     setError(null);
-    try { setEmail((await run()).email); } catch { setError(t('auth.error')); }
+    try { setEmail((await run()).email); } catch (e) { if (!isConsentRequired(e)) setError(t('auth.error')); }
   };
 
   const choose = async () => {
@@ -68,7 +69,7 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
               </button>
             </>
           : <button type="button" style={primaryBtn} disabled={signingIn} onClick={() => void doSignIn()}>{t('auth.signIn')}</button>}
-        {notice && <div role="status" style={noticeText}>{notice}</div>}
+        {consent && !email && <ConsentNotice disabled={signingIn} onContinue={() => void doSignIn()} />}
         {working && <div role="status" style={noticeText}>{t('join.working')}</div>}
         {error && <div role="alert" style={errorText}>{error}</div>}
       </Glass>

@@ -1,8 +1,8 @@
 import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
-import { AuthNeeded, Offline } from './auth';
+import { AuthNeeded, Offline, signOut } from './auth';
 import { findFile, findFolder } from './drive';
-import { FOLDER_NAME, LEDGER_NAME, setLedgerRef, syncFresh, type SyncStatusCode } from './sync';
+import { FOLDER_NAME, LEDGER_NAME, dropLocalShared, resetLedgerState, restoreLocalShared, setLedgerRef, syncFresh, type SyncStatusCode } from './sync';
 
 export type AdoptResult = 'adopted' | 'none' | Exclude<SyncStatusCode, 'ok'>;
 
@@ -11,6 +11,9 @@ export type AdoptResult = 'adopted' | 'none' | Exclude<SyncStatusCode, 'ok'>;
  * ledger.json (e.g. Dad's new phone), sync it down FIRST and use its shared settings ('adopted').
  * Nothing shared is written here. 'none' = no ledger for this account: run Setup as the owner.
  * Lookup only: creates no folder.
+ * A local shared row (phone used signed out) is removed raw before the first sync so the owner's
+ * settings survive; other local rows merge in. If that sync fails the row is put back and the phone
+ * signed out, so no later background sync can push it over the owner's.
  */
 export async function adoptExistingLedger(): Promise<AdoptResult> {
   let fileId: string | null = null;
@@ -26,9 +29,18 @@ export async function adoptExistingLedger(): Promise<AdoptResult> {
   }
   if (!folderId || !fileId) return 'none';
   await setLedgerRef({ folderId, fileId });
+  const dropped = await dropLocalShared();
   const r = await syncFresh();
+  if (r.status !== 'ok') {
+    await resetLedgerState();
+    if (dropped) {
+      await restoreLocalShared(dropped);
+      await signOut();
+    }
+    await reloadSettings();
+    return r.status;
+  }
   await reloadSettings();
-  if (r.status !== 'ok') return r.status;
   const shared = await db.settings.get('shared');
   return shared && !shared.deleted ? 'adopted' : 'none';
 }

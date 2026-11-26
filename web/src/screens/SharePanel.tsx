@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { Glass } from '../ui/Glass';
 import { t, useLanguage } from '../i18n';
 import { primaryBtn } from '../lock/PinPad';
-import { useSignIn } from '../ui/useSignIn';
+import { isConsentRequired, useSignIn } from '../ui/useSignIn';
+import { ConsentNotice } from '../ui/ConsentNotice';
+import { adoptExistingLedger } from '../sync/onboard';
 import { currentEmail, signOut } from '../sync/auth';
 import { InvalidEmail, inviteByEmail, isOwner } from '../sync/share';
 import { useSettings } from '../settings/store';
@@ -17,12 +19,13 @@ const heading: CSSProperties = { fontSize: 15, fontWeight: 800, color: '#FFFFFF'
  */
 export function SharePanel() {
   useLanguage();
-  const { shared } = useSettings();
-  const { run, busy: signingIn, notice } = useSignIn();
+  const { shared, saveShared } = useSettings();
+  const { run, busy: signingIn, consent } = useSignIn();
   const [email, setEmail] = useState<string | null>(null);
   const [owner, setOwner] = useState(false);
   const [invite, setInvite] = useState('');
   const [sending, setSending] = useState(false);
+  const [adopting, setAdopting] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -32,9 +35,21 @@ export function SharePanel() {
   }, []);
   useEffect(() => { void refresh().catch(() => {}); }, [refresh, shared]);
 
+  // Signing in later (phone used signed out): an existing ledger for this account is adopted
+  // (never written over); with none, this phone becomes the owner.
   const doSignIn = async () => {
     setMsg(null);
-    try { await run(); } catch { setMsg({ ok: false, text: t('auth.error') }); }
+    setAdopting(true);
+    try {
+      const { email: me } = await run();
+      const r = await adoptExistingLedger();
+      if (r === 'none') await saveShared({ ownerEmail: me });
+      else if (r !== 'adopted') setMsg({ ok: false, text: t('welcome.syncError') });
+    } catch (e) {
+      if (!isConsentRequired(e)) setMsg({ ok: false, text: t('auth.error') });
+    } finally {
+      setAdopting(false);
+    }
     await refresh();
   };
   const doSignOut = async () => {
@@ -68,9 +83,9 @@ export function SharePanel() {
           </>
         : <>
             <div style={{ ...mutedText, textAlign: 'left' }}>{t('share.notSignedIn')}</div>
-            <button type="button" style={primaryBtn} disabled={signingIn} onClick={() => void doSignIn()}>{t('auth.signIn')}</button>
+            <button type="button" style={primaryBtn} disabled={signingIn || adopting} onClick={() => void doSignIn()}>{t('auth.signIn')}</button>
           </>}
-      {notice && <div role="status" style={noticeText}>{notice}</div>}
+      {consent && !email && <ConsentNotice disabled={signingIn || adopting} onContinue={() => void doSignIn()} />}
       {email && owner && (
         <>
           <div style={{ height: 1, background: 'rgba(255,255,255,0.12)' }} />

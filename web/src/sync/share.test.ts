@@ -200,3 +200,26 @@ describe('ownFolderId', () => {
     expect(drive.ensureFolder).toHaveBeenCalledWith('Restaurant Accounts');
   });
 });
+
+describe('joining from a phone that was used signed out ("Not now")', () => {
+  const localRow = async () => {
+    await saveShared({ restaurantName: 'My local', country: 'FR', currency: 'EUR' }); // newer than the owner's
+    await db.entries.put({ id: 'offline1', updatedAt: 50, deviceId: 'me', deleted: false, kind: 'expense', date: '2026-11-01', amountIncl: 700, categoryId: 'c', method: 'cash', createdBy: '' } as any);
+  };
+  it('the local shared row is removed raw before the first sync: the owner\'s settings survive, local entries merge in', async () => {
+    await localRow();
+    files.set('sharedLedger', { data: owned, version: 7 });
+    await openShared();
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Chez Dad', updatedAt: 5, deviceId: 'dad', deleted: false });
+    const pushed = files.get('sharedLedger')!.data as Ledger;
+    expect(pushed.settings).toEqual(owned.settings); // no tombstone, no local row
+    expect(pushed.entries.map((e) => e.id)).toEqual(['offline1']);
+  });
+  it('the sync fails: the local row comes back and the joined ref is dropped', async () => {
+    await localRow();
+    drive.readJson.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'Offline' }));
+    await expect(openShared()).rejects.toThrow();
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'My local' });
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+  });
+});

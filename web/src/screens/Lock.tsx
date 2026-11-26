@@ -4,8 +4,9 @@ import { t, useLanguage } from '../i18n';
 import { biometricEnabled, checkPin, clearPin, lockoutRemainingMs, unlockBiometric } from '../lock/lock';
 import { PinPad, primaryBtn } from '../lock/PinPad';
 import { currentEmail } from '../sync/auth';
-import { useSignIn } from '../ui/useSignIn';
-import { errorText, linkBtn, noticeText } from '../ui/styles';
+import { isConsentRequired, useSignIn } from '../ui/useSignIn';
+import { ConsentNotice } from '../ui/ConsentNotice';
+import { errorText, linkBtn } from '../ui/styles';
 
 const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -19,7 +20,7 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
   // "Forgot PIN?" only when this phone has a Google session to prove who you are.
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
-  const { run: runSignIn, busy: signingIn, notice } = useSignIn();
+  const { run: runSignIn, busy: signingIn, consent } = useSignIn();
 
   useEffect(() => {
     let live = true;
@@ -39,6 +40,7 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
       await clearPin();
       onUnlock();
     } catch (e) {
+      if (isConsentRequired(e)) return;
       setForgotError((e as Error | undefined)?.name === 'EmailMismatch'
         ? t('lock.forgotMismatch', { email: authEmail })
         : t('lock.forgotError'));
@@ -90,7 +92,7 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
           {authEmail && (
             <button type="button" style={linkBtn} disabled={signingIn} onClick={() => void forgot()}>{t('lock.forgot')}</button>
           )}
-          {notice && <div role="status" style={noticeText}>{notice}</div>}
+          {consent && <ConsentNotice disabled={signingIn} onContinue={() => void forgot()} />}
           {forgotError && <div role="alert" style={errorText}>{forgotError}</div>}
         </Glass>
       </div>

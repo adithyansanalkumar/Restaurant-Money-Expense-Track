@@ -2,7 +2,7 @@ import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
 import { Offline, currentEmail, getAccessToken } from './auth';
 import { ensureFolder, findFile, shareFile, shareFolder, type Id } from './drive';
-import { FOLDER_NAME, LEDGER_NAME, resetLedgerState, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
+import { FOLDER_NAME, LEDGER_NAME, dropLocalShared, resetLedgerState, restoreLocalShared, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
 
 /**
  * How Join picks the shared ledger: 'file' = pick ledger.json itself; 'folder' = pick the shared
@@ -133,7 +133,9 @@ async function pick(mode: 'file' | 'folder', token: string): Promise<string> {
 
 /**
  * Join: pick the shared ledger (JOIN_MODE), store it as a joined ref (dropping the old ref and
- * last-sync), then sync it down. Never writes shared settings: they come from the ledger.
+ * last-sync), then sync it down. Never writes shared settings: they come from the ledger. A local
+ * shared row (phone used signed out) is removed raw first; other local rows merge in. If the sync
+ * fails, that row is put back and the joined ref dropped.
  * Throws PickerCancelled, NoLedger or JoinSyncFailed.
  */
 export async function openShared(mode: 'file' | 'folder' = JOIN_MODE): Promise<void> {
@@ -149,7 +151,13 @@ export async function openShared(mode: 'file' | 'folder' = JOIN_MODE): Promise<v
   }
   await resetLedgerState();
   await setLedgerRef(ref);
+  const dropped = await dropLocalShared();
   const r = await syncFresh();
+  if (r.status !== 'ok') {
+    await resetLedgerState();
+    if (dropped) await restoreLocalShared(dropped);
+    await reloadSettings();
+    throw new JoinSyncFailed(r.status);
+  }
   await reloadSettings();
-  if (r.status !== 'ok') throw new JoinSyncFailed(r.status);
 }
