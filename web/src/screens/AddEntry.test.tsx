@@ -5,7 +5,7 @@ import { db } from '../db/db';
 import { setLanguage } from '../i18n';
 import { put, seedDefaults } from '../db/repo';
 import { saveShared } from '../settings/store';
-import type { Supplier } from '../domain/types';
+import type { Entry, Payment, Supplier } from '../domain/types';
 import { AddEntry } from './AddEntry';
 
 beforeEach(async () => {
@@ -143,4 +143,31 @@ test('initial.supplierId pre-selects its default category', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
   await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
   expect((await db.entries.toArray())[0]).toMatchObject({ supplierId: metro.id, categoryId: 'cat:expense:3' });
+});
+
+test('editing a paid expense does not duplicate its payment; credit edits keep payments', async () => {
+  const metro = (await db.suppliers.toArray())[0];
+  const e = await put<Entry>('entries', { kind: 'expense', date: '2026-11-10', amountIncl: 5000, categoryId: 'cat:expense:3', supplierId: metro.id, method: 'cash', status: 'paid', createdBy: '' });
+  await put<Payment>('payments', { entryId: e.id, date: '2026-11-10', amount: 5000, method: 'cash', createdBy: '' });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  tap('0');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect(await db.entries.count()).toBe(1);
+  const pays = await db.payments.toArray();
+  expect(pays.filter((p) => !p.deleted)).toHaveLength(1);
+  expect(pays.filter((p) => !p.deleted)[0].amount).toBe(50000);
+  expect(pays.filter((p) => p.deleted)).toHaveLength(1);
+
+  const c = await put<Entry>('entries', { kind: 'expense', date: '2026-11-11', amountIncl: 8000, categoryId: 'cat:expense:3', supplierId: metro.id, method: 'cash', status: 'credit', createdBy: '' });
+  await put<Payment>('payments', { entryId: c.id, date: '2026-11-12', amount: 3000, method: 'cash', createdBy: '' });
+  const go2 = vi.fn();
+  render(<AddEntry onGo={go2} initial={c} />);
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Save expense' })).at(-1)!);
+  await waitFor(() => expect(go2).toHaveBeenCalledWith('home'));
+  const cp = (await db.payments.toArray()).filter((p) => p.entryId === c.id);
+  expect(cp).toHaveLength(1);
+  expect(cp[0].deleted).toBe(false);
 });

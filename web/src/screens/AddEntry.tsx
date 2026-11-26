@@ -5,11 +5,12 @@ import { Segmented } from '../ui/Segmented';
 import type { Route } from '../ui/router';
 import { pressKey, type KeypadKey } from '../domain/keypad';
 import { parseAmount } from '../domain/money';
+import { todayISO } from '../domain/clock';
 import { paymentsForPaidNow } from '../domain/credit';
 import type { Category, Entry, Id, Supplier } from '../domain/types';
 import { db } from '../db/db';
 import { getDeviceId } from '../db/device';
-import { listLive, put } from '../db/repo';
+import { listLive, put, softDelete } from '../db/repo';
 import { t, useLanguage } from '../i18n';
 import { COUNTRY_DEFAULTS, useSettings } from '../settings/store';
 
@@ -19,11 +20,6 @@ const OTHER_EXPENSE_ID = 'cat:expense:13';
 const IN = '#6FE3A0';
 const OUT = '#FF8E8E';
 
-const localToday = () => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
 
 function formatTyped(cents: number, sep: ',' | '.'): string {
   const whole = Math.floor(cents / 100);
@@ -71,7 +67,7 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
   const [newName, setNewName] = useState('');
   const [categoryId, setCategoryId] = useState<Id | undefined>(initial?.kind === 'income' ? undefined : initial?.categoryId);
   const [channelId, setChannelId] = useState<Id | undefined>(initial?.kind === 'income' ? initial.categoryId : undefined);
-  const [date, setDate] = useState(initial?.date ?? localToday());
+  const [date, setDate] = useState(initial?.date ?? todayISO());
   const [method, setMethod] = useState<Method>(initial?.method ?? 'cash');
   const [status, setStatus] = useState<'paid' | 'credit'>(initial?.status ?? 'paid');
   const [dueDate, setDueDate] = useState(initial?.dueDate ?? '');
@@ -156,7 +152,8 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
         const channelCat = incomeCats.find((c) => c.id === channelSel);
         const noteText = note.trim();
         const base = {
-          kind, date, amountIncl: cents, method, createdBy: '',
+          kind, date, amountIncl: cents, method, createdBy: initial?.createdBy ?? '',
+          ...(initial?.id ? { id: initial.id } : {}),
           ...(noteText ? { note: noteText } : {}),
           ...(initial?.photoId ? { photoId: initial.photoId } : {}),
           ...(initial?.amountExcl !== undefined ? { amountExcl: initial.amountExcl } : {}),
@@ -168,6 +165,12 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
               ...(status === 'credit' && dueDate ? { dueDate } : {}),
             })
           : await put<Entry>('entries', { ...base, categoryId: channelCat?.id ?? '', channel: channelCat?.name ?? '' });
+        // Editing: a paid expense gets fresh payments, so retire the old live ones first
+        // (credit entries keep their payments untouched).
+        if (initial?.id && entry.kind === 'expense' && entry.status === 'paid') {
+          const old = await db.payments.where('entryId').equals(entry.id).toArray();
+          for (const p of old) if (!p.deleted) await softDelete('payments', p.id);
+        }
         for (const p of paymentsForPaidNow(entry)) await put('payments', p);
       });
       onGo('home');
