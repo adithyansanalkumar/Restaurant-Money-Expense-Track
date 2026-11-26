@@ -18,12 +18,13 @@ export function App() {
   const needsSetup = loaded && !shared;
 
   useEffect(() => {
-    useEffect(() => { if (route !== 'add') setEditing(null); }, [route]);
-
-  if (!loaded) return;
+    if (!loaded) return;
     if (needsSetup && route !== 'setup' && route !== 'join') go('setup');
     else if (!needsSetup && route === 'setup') go('home');
   }, [loaded, needsSetup, route, go]);
+
+  // Drop the edit hand-off whenever we leave 'add' (e.g. browser back).
+  useEffect(() => { if (route !== 'add') setEditing(null); }, [route]);
 
   if (!loaded) return <div className="scene app-shell" />;
   if (route === 'setup' || (needsSetup && route !== 'join')) {
