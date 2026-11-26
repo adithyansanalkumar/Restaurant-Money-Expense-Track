@@ -279,9 +279,14 @@ function runSync(bypassPending: boolean): Promise<SyncResult> {
     }
     const result: SyncResult = { ...r, at: r.at ?? Date.now() };
     running = null;
-    if (superseded || r.status === 'pending') {
-      // reset while running: leave the reset state (idle, no retry) as it is; pending: nothing happened
+    if (superseded) {
+      // reset while running: leave the reset state (idle, no retry) as it is
       setState({ running: false });
+      return result;
+    }
+    if (r.status === 'pending') {
+      // shown as "Not syncing yet — finish connecting"; no retry (the adoption lookup settles it)
+      setState({ running: false, status: 'pending', message: undefined });
       return result;
     }
     if (r.status === 'error') console.warn('[sync]', r.message);
@@ -308,6 +313,40 @@ export const isAdoptPending = async (): Promise<boolean> => !!(await db.meta.get
 /** Bump the generation (a running sync can't write any more) and stop timers. Adoption / join start with it. */
 export function interruptSync(): void {
   resetTimers();
+}
+
+/** Any synced row changed after the last successful sync (or any row at all if never synced). */
+export async function hasUnsyncedChanges(): Promise<boolean> {
+  const last = (await db.meta.get('lastSync'))?.value as { at: number } | undefined;
+  for (const t of LEDGER_TABLES) {
+    const n = last ? await tbl(t).where('updatedAt').above(last.at).count() : await tbl(t).count();
+    if (n > 0) return true;
+  }
+  return false;
+}
+
+async function hasLocalRows(): Promise<boolean> {
+  for (const t of LEDGER_TABLES) if ((await tbl(t).count()) > 0) return true;
+  return false;
+}
+
+/**
+ * Before offering "Reset this phone": one best-effort sync of the current account (at most
+ * timeoutMs). True = warn "Entries not yet synced will be lost": the sync did not succeed (and the
+ * phone has rows), or rows changed after the last successful sync.
+ */
+export async function checkBeforeReset(timeoutMs = 10_000): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((r) => { timer = setTimeout(() => r(null), timeoutMs); });
+  try {
+    const r = await Promise.race([syncNow(), timeout]);
+    if (!r || r.status !== 'ok') return await hasLocalRows(); // couldn't confirm: warn unless empty
+    return await hasUnsyncedChanges();
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

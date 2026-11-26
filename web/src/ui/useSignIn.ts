@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { signIn, type SignInOptions } from '../sync/auth';
 import { signInLater, type SignInLaterResult } from '../sync/onboard';
-import { resetPhone } from '../sync/sync';
+import { checkBeforeReset, resetPhone } from '../sync/sync';
 import { reloadSettings } from '../settings/store';
 
 export const isConsentRequired = (e: unknown) => (e as Error | undefined)?.name === 'ConsentRequired';
@@ -19,6 +19,8 @@ export function useGuardedSignIn<T>(fn: (opts: SignInOptions) => Promise<T>) {
   const [busy, setBusy] = useState(false);
   const [consent, setConsent] = useState(false);
   const [switchTo, setSwitchTo] = useState<string | null>(null);
+  // "Entries not yet synced will be lost": set after one best-effort sync of the current account
+  const [switchWarn, setSwitchWarn] = useState(false);
   const lastOpts = useRef<SignInOptions>({});
 
   const run = useCallback(async (opts: SignInOptions = {}): Promise<T | null> => {
@@ -30,7 +32,12 @@ export function useGuardedSignIn<T>(fn: (opts: SignInOptions) => Promise<T>) {
       return await fn(opts);
     } catch (e) {
       if (isConsentRequired(e)) { setConsent(true); return null; }
-      if (isAccountSwitch(e)) { setSwitchTo((e as Error & { email: string }).email); return null; }
+      if (isAccountSwitch(e)) {
+        setSwitchTo((e as Error & { email: string }).email);
+        setSwitchWarn(false);
+        void checkBeforeReset().then(setSwitchWarn, () => setSwitchWarn(true));
+        return null;
+      }
       throw e;
     } finally {
       setBusy(false);
@@ -53,7 +60,7 @@ export function useGuardedSignIn<T>(fn: (opts: SignInOptions) => Promise<T>) {
   }, [run]);
 
   const cancelSwitch = useCallback(() => setSwitchTo(null), []);
-  return { run, busy, consent, switchTo, resetAndRetry, cancelSwitch };
+  return { run, busy, consent, switchTo, switchWarn, resetAndRetry, cancelSwitch };
 }
 
 /** Plain sign-in (Join picks its ledger itself). */

@@ -24,7 +24,7 @@ const signOut = vi.fn(async () => {});
 const signIn = vi.fn(async (_o?: unknown) => ({ email: 'dad@x.com' }));
 vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: async () => 'TOK', currentEmail: async () => 'dad@x.com', signOut: () => signOut(), signIn: (o?: unknown) => signIn(o) }));
 
-import { adoptExistingLedger, signInLater } from './onboard';
+import { adoptExistingLedger, resumeAdoptionIfPending, signInLater } from './onboard';
 import { stopSync, syncNow } from './sync';
 
 const ledger: Ledger = {
@@ -40,6 +40,7 @@ beforeEach(async () => {
   files.clear();
   for (const f of Object.values(drive)) f.mockClear();
   signOut.mockClear();
+  signIn.mockClear();
   drive.findFolder.mockImplementation(async () => null);
   drive.findFile.mockImplementation(async () => null);
 });
@@ -159,5 +160,26 @@ describe('signInLater', () => {
     const { AccountSwitch } = await import('./auth');
     signIn.mockRejectedValueOnce(new AccountSwitch('x@y.com'));
     await expect(signInLater()).rejects.toBeInstanceOf(AccountSwitch);
+  });
+});
+
+describe('resume and dedupe', () => {
+  it('app start: adoptPending + a session → runs the lookup once in the background (no popup)', async () => {
+    await db.meta.put({ key: 'adoptPending', value: true });
+    files.set('L', { data: ledger, version: 9 });
+    drive.findFolder.mockResolvedValue('F');
+    drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
+    expect(await resumeAdoptionIfPending()).toBe('adopted');
+    expect(signIn).not.toHaveBeenCalled();
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+  });
+  it('nothing pending: no lookup', async () => {
+    expect(await resumeAdoptionIfPending()).toBeNull();
+    expect(drive.findFolder).not.toHaveBeenCalled();
+  });
+  it('overlapping calls share one lookup', async () => {
+    const [a, b] = await Promise.all([adoptExistingLedger(), adoptExistingLedger()]);
+    expect([a, b]).toEqual(['none', 'none']);
+    expect(drive.findFolder).toHaveBeenCalledTimes(1);
   });
 });

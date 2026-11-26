@@ -5,6 +5,8 @@ import { seedDefaults } from '../db/repo';
 import { t, useLanguage, type Lang } from '../i18n';
 import { COUNTRY_DEFAULTS, useSettings } from '../settings/store';
 import { currentEmail } from '../sync/auth';
+import { adoptExistingLedger } from '../sync/onboard';
+import { isAdoptPending } from '../sync/sync';
 
 const label: CSSProperties = { fontSize: 12, fontWeight: 600, color: '#C6D8E6' };
 const select: CSSProperties = { height: 46, borderRadius: 14, padding: '0 10px', font: '600 14px Inter, sans-serif', color: '#FFFFFF' };
@@ -23,6 +25,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
   const [taxView, setTaxView] = useState<'incl' | 'excl'>('incl');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [driveError, setDriveError] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,7 +44,15 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
     if (busy) return;
     setBusy(true);
     setError(false);
+    setDriveError(false);
     try {
+      // Signed in but this account's Drive not checked yet: it may already hold a restaurant,
+      // which must be adopted, not overwritten. Owner setup only when there is none.
+      if ((await isAdoptPending()) && (await currentEmail())) {
+        const r = await adoptExistingLedger();
+        if (r === 'adopted') { onGo('home'); return; }
+        if (r !== 'none') { setDriveError(true); return; }
+      }
       // Shared settings go last: once that row exists, App stops routing to setup.
       await seedDefaults();
       await saveDevice({ appLanguage: device.appLanguage });
@@ -125,6 +136,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       </Glass>
 
       {error && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E' }}>{t('setup.error')}</div>}
+      {driveError && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E', textAlign: 'center' }}>{t('welcome.driveError')}</div>}
       <button type="button" onClick={() => void cont()} disabled={busy} style={{
         alignSelf: 'stretch', marginTop: 'auto', height: 58, borderRadius: 29, border: 0,
         background: 'linear-gradient(160deg, #FFFFFF 0%, #DDF2FB 100%)',

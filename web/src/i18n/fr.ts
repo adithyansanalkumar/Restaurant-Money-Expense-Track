@@ -267,4 +267,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'switch.cancel': "Annuler",
   'share.pending': "Votre Google Drive n’a pas encore pu être vérifié : rien ne se synchronise.",
   'share.retry': "Réessayer",
+  'sync.pending': "Pas encore synchronisé — terminez la connexion",
+  'sync.retry': "Réessayer",
+  'switch.unsynced': "Les saisies pas encore synchronisées seront perdues",
 };

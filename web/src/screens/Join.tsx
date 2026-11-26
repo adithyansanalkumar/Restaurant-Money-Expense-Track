@@ -5,7 +5,8 @@ import { t, useLanguage } from '../i18n';
 import { primaryBtn } from '../lock/PinPad';
 import { useSignIn } from '../ui/useSignIn';
 import { SignInPrompts } from '../ui/ConsentNotice';
-import { currentEmail } from '../sync/auth';
+import { currentEmail, signOut } from '../sync/auth';
+import { isAdoptPending } from '../sync/sync';
 import { JOIN_MODE, openShared } from '../sync/share';
 import { useSettings } from '../settings/store';
 import { errorText, iconTile, linkBtn, mutedText, noticeText, screenCol, screenTitle } from '../ui/styles';
@@ -36,6 +37,13 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
     } catch { setError(t('auth.error')); }
   };
 
+  // Leaving without joining: a sign-in made here (adoptPending) is undone, so Setup can't run
+  // signed in with this account's Drive unchecked.
+  const back = async () => {
+    try { if (await isAdoptPending()) await signOut(); } catch { /* local sign-out still happened */ }
+    onGo('setup');
+  };
+
   const choose = async () => {
     if (working) return;
     setError(null);
@@ -55,7 +63,7 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
   return (
     <div className="join" style={screenCol}>
       <div style={{ alignSelf: 'stretch' }}>
-        <button type="button" style={{ ...linkBtn, textDecoration: 'none', minWidth: 44 }} onClick={() => onGo('setup')}><span aria-hidden="true">‹ </span>{t('join.back')}</button>
+        <button type="button" style={{ ...linkBtn, textDecoration: 'none', minWidth: 44 }} onClick={() => void back()}><span aria-hidden="true">‹ </span>{t('join.back')}</button>
       </div>
       <Glass style={iconTile}>
         <svg aria-hidden="true" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M17 8v6M14 11h6" /></svg>

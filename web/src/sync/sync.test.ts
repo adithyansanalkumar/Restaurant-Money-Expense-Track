@@ -62,7 +62,7 @@ vi.mock('./auth', async (orig) => ({
 }));
 
 import { AuthNeeded, Offline } from './auth';
-import { _pendingSync, _retryDelay, getSyncState, resetLedgerState, resetPhone, scheduleSync, startSync, stopSync, syncFresh, syncNow } from './sync';
+import { _pendingSync, _retryDelay, checkBeforeReset, getSyncState, resetLedgerState, resetPhone, scheduleSync, startSync, stopSync, syncFresh, syncNow } from './sync';
 import { signOut } from './auth';
 
 const empty = (): Ledger => ({ schema: 1, entries: [], payments: [], suppliers: [], categories: [], settings: [] });
@@ -482,6 +482,28 @@ describe('retries', () => {
     expect(left).toEqual(expect.arrayContaining(['device', 'lock']));
     for (const k of ['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth']) expect(left).not.toContain(k);
     expect(_pendingSync()).toBe(false); // no tombstones / hooks scheduled a sync
+  });
+
+  it('checkBeforeReset: a successful sync with nothing newer → no warning; a failed sync with rows → warning', async () => {
+    files.set('ledger1', { version: 1, data: empty() });
+    await put<Supplier>('suppliers', { id: 'L1', name: 'Local' });
+    expect(await checkBeforeReset()).toBe(false);
+    getAccessToken.mockRejectedValue(new Offline());
+    expect(await checkBeforeReset()).toBe(true);
+  });
+
+  it('checkBeforeReset: a sync that hangs past the timeout counts as not succeeded', async () => {
+    await put<Supplier>('suppliers', { id: 'L1', name: 'Local' });
+    let release!: () => void;
+    getAccessToken.mockImplementation(() => new Promise((_r, rej) => { release = () => rej(new Offline()); }));
+    expect(await checkBeforeReset(30)).toBe(true);
+    release();
+    await vi.waitFor(() => expect(getSyncState().running).toBe(false));
+  });
+
+  it('checkBeforeReset: an empty phone never warns', async () => {
+    getAccessToken.mockRejectedValue(new Offline());
+    expect(await checkBeforeReset()).toBe(false);
   });
 
   it('authNeeded does not retry', async () => {

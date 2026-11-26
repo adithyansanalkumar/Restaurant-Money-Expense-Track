@@ -265,4 +265,7 @@ export const en = {
   'switch.cancel': "Cancel",
   'share.pending': "Your Google Drive couldn’t be checked yet, so nothing is syncing.",
   'share.retry': "Try again",
+  'sync.pending': "Not syncing yet — finish connecting",
+  'sync.retry': "Retry",
+  'switch.unsynced': "Entries not yet synced will be lost",
 } as const;

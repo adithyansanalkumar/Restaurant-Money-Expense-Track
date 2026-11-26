@@ -3,7 +3,7 @@ import { reloadSettings, saveShared } from '../settings/store';
 import { AuthNeeded, Offline, currentEmail, signIn, type SignInOptions } from './auth';
 import { findFile, findFolder } from './drive';
 import {
-  FOLDER_NAME, LEDGER_NAME, clearAdoptPending, dropLocalShared, interruptSync, resetLedgerState,
+  FOLDER_NAME, LEDGER_NAME, clearAdoptPending, dropLocalShared, interruptSync, isAdoptPending, resetLedgerState,
   restoreLocalShared, setLedgerRef, syncFresh, syncNow, type SyncStatusCode,
 } from './sync';
 
@@ -30,7 +30,21 @@ async function becomeOwner(): Promise<void> {
  * back, the ref dropped and adoptPending kept, so background sync stays off until a retry.
  * Only this and openShared clear adoptPending.
  */
-export async function adoptExistingLedger(): Promise<AdoptResult> {
+let adopting: Promise<AdoptResult> | null = null;
+
+export function adoptExistingLedger(): Promise<AdoptResult> {
+  // one at a time (Welcome, Settings, SyncStatus and the app-start resume may overlap)
+  if (!adopting) adopting = doAdopt().finally(() => { adopting = null; });
+  return adopting;
+}
+
+/** App start: signed in with adoptPending still set (interrupted earlier) → run the lookup once, no popup. */
+export async function resumeAdoptionIfPending(): Promise<AdoptResult | null> {
+  if (!(await isAdoptPending()) || !(await currentEmail())) return null;
+  return adoptExistingLedger();
+}
+
+async function doAdopt(): Promise<AdoptResult> {
   let fileId: string | null = null;
   let folderId: string | null = null;
   try {

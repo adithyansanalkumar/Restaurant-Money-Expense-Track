@@ -1,9 +1,11 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { db } from '../db/db';
 import { setLanguage } from '../i18n';
 import * as repo from '../db/repo';
+const adopt = vi.hoisted(() => vi.fn());
+vi.mock('../sync/onboard', () => ({ adoptExistingLedger: () => adopt() }));
 import { Setup } from './Setup';
 
 beforeEach(async () => {
@@ -45,4 +47,36 @@ test('failed seeding leaves no shared settings, shows an error and re-enables Co
   expect(go).not.toHaveBeenCalled();
   expect(await db.settings.get('shared')).toBeUndefined();
   expect(screen.getByText('Continue')).not.toBeDisabled();
+});
+
+describe('signed in with this account\'s Drive not checked yet (adoptPending)', () => {
+  beforeEach(async () => {
+    adopt.mockReset();
+    await db.meta.bulkPut([{ key: 'adoptPending', value: true }, { key: 'auth', value: { session: 'S', email: 'adi@x.com' } }]);
+  });
+  test('Continue runs the adoption lookup first: adopted → home, Setup writes nothing', async () => {
+    adopt.mockResolvedValue('adopted');
+    const go = vi.fn();
+    render(<Setup onGo={go} />);
+    fireEvent.click(screen.getByText('Continue'));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect(await db.settings.get('shared')).toBeUndefined();
+  });
+  test('lookup fails → error, nothing written, stays', async () => {
+    adopt.mockResolvedValue('offline');
+    const go = vi.fn();
+    render(<Setup onGo={go} />);
+    fireEvent.click(screen.getByText('Continue'));
+    expect(await screen.findByText('Couldn’t reach Google Drive — try again')).toBeTruthy();
+    expect(go).not.toHaveBeenCalled();
+    expect(await db.settings.get('shared')).toBeUndefined();
+  });
+  test('none → owner setup proceeds with ownerEmail', async () => {
+    adopt.mockResolvedValue('none');
+    const go = vi.fn();
+    render(<Setup onGo={go} />);
+    fireEvent.click(screen.getByText('Continue'));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect((await db.settings.get('shared'))?.ownerEmail).toBe('adi@x.com');
+  });
 });

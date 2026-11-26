@@ -30,7 +30,10 @@ export function Welcome({ onSetup, onDone }: { onSetup: () => void; onDone: () =
   const settle = (r: AdoptResult | 'kept') => {
     if (r === 'adopted') onDone();
     else if (r === 'none' || r === 'kept') onSetup();
-    else setError(t('welcome.driveError'));
+    else {
+      if (r === 'authNeeded') setEmail(null); // session gone: the next tap signs in again
+      setError(t('welcome.driveError'));
+    }
   };
 
   const start = async (viaReset = false) => {

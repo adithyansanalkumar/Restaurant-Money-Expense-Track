@@ -21,6 +21,8 @@ vi.mock('../sync/drive', () => ({
   writeJson: vi.fn(async () => ({ id: 'ledger1', version: '1' })),
 }));
 
+const adopt = vi.hoisted(() => vi.fn());
+vi.mock('../sync/onboard', async (orig) => ({ ...(await orig<typeof import('../sync/onboard')>()), adoptExistingLedger: () => adopt() }));
 import { AuthNeeded } from '../sync/auth';
 import { syncNow } from '../sync/sync';
 import { SyncStatus } from './SyncStatus';
@@ -57,4 +59,19 @@ test('offline and error states', async () => {
   getAccessToken.mockRejectedValueOnce(new Error('boom'));
   await act(async () => { await syncNow(); });
   expect(screen.getByText('Sync error')).toBeTruthy();
+});
+
+test('pending: "Not syncing yet — finish connecting" with Retry that runs the lookup and shows its error', async () => {
+  await db.meta.put({ key: 'adoptPending', value: true });
+  render(<SyncStatus />);
+  await act(async () => { await syncNow(); });
+  expect(screen.getByText('Not syncing yet — finish connecting')).toBeTruthy();
+  adopt.mockResolvedValueOnce('offline');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByText('Couldn’t reach Google Drive — try again')).toBeTruthy();
+  expect(adopt).toHaveBeenCalledTimes(1);
+  adopt.mockImplementationOnce(async () => { await db.meta.delete('adoptPending'); return 'adopted'; });
+  getAccessToken.mockResolvedValue('TOK');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(screen.queryByText('Not syncing yet — finish connecting')).toBeNull());
 });

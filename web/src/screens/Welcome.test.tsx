@@ -18,7 +18,8 @@ vi.mock('../sync/auth', async (orig) => ({
   currentEmail: async () => auth.email,
 }));
 const resetPhone = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock('../sync/sync', async (orig) => ({ ...(await orig<typeof import('../sync/sync')>()), resetPhone: () => resetPhone() }));
+const atRisk = vi.hoisted(() => ({ value: false }));
+vi.mock('../sync/sync', async (orig) => ({ ...(await orig<typeof import('../sync/sync')>()), resetPhone: () => resetPhone(), checkBeforeReset: async () => atRisk.value }));
 const adopt = vi.hoisted(() => vi.fn());
 vi.mock('../sync/onboard', () => ({
   adoptExistingLedger: () => adopt(),
@@ -36,6 +37,7 @@ beforeEach(async () => {
   adopt.mockReset();
   auth.signOut.mockReset().mockImplementation(async () => { auth.email = null; });
   resetPhone.mockClear();
+  atRisk.value = false;
   window.location.hash = '';
 });
 
@@ -144,4 +146,33 @@ test('the join route is still reachable on first run', async () => {
   window.location.hash = '#/join';
   render(<App />);
   expect(await screen.findByText('Join a shared restaurant')).toBeTruthy();
+});
+
+test('lookup says authNeeded (session expired): the next tap signs in again instead of looping', async () => {
+  adopt.mockResolvedValueOnce('authNeeded').mockResolvedValueOnce('none');
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  expect(await screen.findByText('Couldn’t reach Google Drive — try again')).toBeTruthy();
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  expect(await screen.findByText('Set up your restaurant')).toBeTruthy();
+  expect(auth.signIn).toHaveBeenCalledTimes(2);
+});
+
+test('reset prompt warns "Entries not yet synced will be lost" when the pre-reset sync could not secure them', async () => {
+  const { AccountSwitch } = await import('../sync/auth');
+  atRisk.value = true;
+  auth.signIn.mockRejectedValueOnce(new AccountSwitch('new@x.com'));
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  expect(await screen.findByText('Entries not yet synced will be lost')).toBeTruthy();
+});
+
+test('no warning when everything is synced', async () => {
+  const { AccountSwitch } = await import('../sync/auth');
+  auth.signIn.mockRejectedValueOnce(new AccountSwitch('new@x.com'));
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  await screen.findByRole('button', { name: 'Reset this phone' });
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByText('Entries not yet synced will be lost')).toBeNull();
 });

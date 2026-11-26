@@ -5,11 +5,12 @@ import { db } from '../db/db';
 import { setLanguage } from '../i18n';
 import { reloadSettings } from '../settings/store';
 
-const auth = vi.hoisted(() => ({ email: null as string | null, signIn: vi.fn() }));
+const auth = vi.hoisted(() => ({ email: null as string | null, signIn: vi.fn(), signOut: vi.fn(async () => {}) }));
 vi.mock('../sync/auth', async (orig) => ({
   ...(await orig<typeof import('../sync/auth')>()),
   currentEmail: async () => auth.email,
   signIn: (o?: unknown) => auth.signIn(o),
+  signOut: () => auth.signOut(),
 }));
 const openShared = vi.hoisted(() => vi.fn());
 vi.mock('../sync/share', async (orig) => ({ ...(await orig<typeof import('../sync/share')>()), openShared: () => openShared() }));
@@ -60,9 +61,26 @@ test('cancelling the picker stays on Join quietly; other failures show an error'
   expect(go).not.toHaveBeenCalled();
 });
 
-test('Back returns to setup', async () => {
+test('Back returns to setup (no sign-out when nothing is pending)', async () => {
+  auth.signOut.mockClear();
   const go = vi.fn();
   render(<Join onGo={go} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
-  expect(go).toHaveBeenCalledWith('setup');
+  await waitFor(() => expect(go).toHaveBeenCalledWith('setup'));
+  expect(auth.signOut).not.toHaveBeenCalled();
+});
+
+test('abandoning Join after signing in here (adoptPending) signs out before routing to setup', async () => {
+  auth.signOut.mockClear();
+  auth.email = 'son@x.com';
+  await db.meta.put({ key: 'adoptPending', value: true });
+  const go = vi.fn();
+  render(<Join onGo={go} />);
+  openShared.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'NoRestaurant' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose the shared ledger' }));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('setup'));
+  expect(auth.signOut).toHaveBeenCalledTimes(1);
+  expect(auth.signOut.mock.invocationCallOrder[0]).toBeLessThan(go.mock.invocationCallOrder[0]);
 });
