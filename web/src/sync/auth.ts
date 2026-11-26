@@ -13,6 +13,9 @@ const EXPIRY_MARGIN_MS = 60_000;
 
 interface StoredAuth { session: string; email: string }
 let cached: { token: string; expiresAt: number } | null = null;
+// Bumped on signIn/signOut so a refresh that was in flight across them is dropped.
+let epoch = 0;
+let refreshing: Promise<string> | null = null;
 let gisLoading: Promise<void> | null = null;
 
 const authUrl = () => (import.meta.env.VITE_AUTH_URL as string | undefined) ?? '';
@@ -72,30 +75,57 @@ export async function signIn(): Promise<{ email: string }> {
   const res = await post('/exchange', { code });
   if (!res.ok) throw new Error('Sign-in failed');
   const d = await res.json() as { session: string; accessToken: string; expiresIn: number; email: string };
+  epoch++;
+  refreshing = null;
   await db.meta.put({ key: 'auth', value: { session: d.session, email: d.email } satisfies StoredAuth });
   cached = { token: d.accessToken, expiresAt: Date.now() + d.expiresIn * 1000 };
   return { email: d.email };
 }
 
+const fresh = () => cached !== null && cached.expiresAt - Date.now() > EXPIRY_MARGIN_MS;
+
 export async function getAccessToken(force = false): Promise<string> {
-  if (!force && cached && cached.expiresAt - Date.now() > EXPIRY_MARGIN_MS) return cached.token;
+  if (!force && fresh()) return cached!.token;
+  if (refreshing) return refreshing;
+  const p = refresh(epoch);
+  refreshing = p;
+  try {
+    return await p;
+  } finally {
+    if (refreshing === p) refreshing = null;
+  }
+}
+
+async function refresh(myEpoch: number): Promise<string> {
+  // The session changed (signIn/signOut) while this refresh was in flight: drop its result.
+  const stale = () => {
+    if (fresh()) return cached!.token;
+    throw new AuthNeeded();
+  };
   const auth = await readAuth();
   if (!auth) throw new AuthNeeded();
   const res = await post('/refresh', { session: auth.session });
+  if (myEpoch !== epoch) return stale();
   if (res.status === 401) {
     cached = null;
-    await db.meta.delete('auth');
+    await db.transaction('rw', db.meta, async () => {
+      const cur = await readAuth();
+      if (cur?.session === auth.session) await db.meta.delete('auth');
+    });
     throw new AuthNeeded();
   }
   if (!res.ok) throw new Offline(`Token refresh failed (${res.status})`);
   const d = await res.json() as { accessToken: string; expiresIn: number };
+  if (myEpoch !== epoch) return stale();
   cached = { token: d.accessToken, expiresAt: Date.now() + d.expiresIn * 1000 };
   return d.accessToken;
 }
 
 export async function signOut(): Promise<void> {
-  const auth = await readAuth();
+  epoch++;
+  refreshing = null;
   cached = null;
+  const auth = await readAuth();
   if (auth) {
     try { await post('/revoke', { session: auth.session }); } catch { /* best effort */ }
   }

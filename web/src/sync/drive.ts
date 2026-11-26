@@ -1,4 +1,4 @@
-import { getAccessToken } from './auth';
+import { getAccessToken, Offline } from './auth';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
@@ -11,7 +11,11 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
     const token = await getAccessToken(force);
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${token}`);
-    return fetch(url, { ...init, headers });
+    try {
+      return await fetch(url, { ...init, headers });
+    } catch {
+      throw new Offline();
+    }
   };
   let res = await send(false);
   if (res.status === 401) res = await send(true);
@@ -40,6 +44,12 @@ export async function findFile(name: string, parentId: Id): Promise<{ id: string
   const q = `name='${esc(name)}' and '${esc(parentId)}' in parents and trashed=false`;
   const r = await (await driveFetch(`${API}/files?${new URLSearchParams({ q, fields: 'files(id,version)', pageSize: '1' })}`)).json();
   return r.files?.length ? { id: r.files[0].id, version: r.files[0].version } : null;
+}
+
+/** Cheap metadata-only read of a file's version (used right before writing). */
+export async function getVersion(id: Id): Promise<string> {
+  const meta = await (await driveFetch(`${API}/files/${encodeURIComponent(id)}?fields=version`)).json();
+  return meta.version;
 }
 
 export async function readJson(id: Id): Promise<{ data: unknown; version: string }> {

@@ -36,6 +36,23 @@ describe('repo', () => {
     expect(row!.updatedAt).toBe(2000);
   });
 
+  it('put is monotonic: a re-put with a clock behind the stored row still moves updatedAt forward', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(5000);
+    await put<Supplier>('suppliers', { id: 's1', name: 'Farm' });
+    vi.spyOn(Date, 'now').mockReturnValue(3000); // clock went backwards
+    const b = await put<Supplier>('suppliers', { id: 's1', name: 'Farm 2' });
+    vi.restoreAllMocks();
+    expect(b.updatedAt).toBe(5001);
+    expect((await db.suppliers.get('s1'))!.updatedAt).toBe(5001);
+  });
+
+  it('put on a new row uses Date.now()', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(7000);
+    const a = await put<Supplier>('suppliers', { id: 'n1', name: 'New' });
+    vi.restoreAllMocks();
+    expect(a.updatedAt).toBe(7000);
+  });
+
   it('seedDefaults twice creates 14 expense categories and 5 income channels once', async () => {
     await seedDefaults();
     await seedDefaults();

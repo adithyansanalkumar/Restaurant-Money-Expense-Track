@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const getAccessToken = vi.fn();
-vi.mock('./auth', () => ({ getAccessToken: (force?: boolean) => getAccessToken(force) }));
+vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: (force?: boolean) => getAccessToken(force) }));
 
-import { ensureFolder, findFile, readJson, writeJson, uploadBlob, shareFolder } from './drive';
+import { ensureFolder, findFile, readJson, writeJson, uploadBlob, shareFolder, getVersion } from './drive';
+import { Offline } from './auth';
 
 const fetchMock = vi.fn();
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
@@ -104,5 +105,20 @@ describe('readJson / uploadBlob / shareFolder', () => {
     expect(url).toContain('/drive/v3/files/fid/permissions');
     expect(url).toContain('sendNotificationEmail=true');
     expect(JSON.parse(init.body)).toEqual({ type: 'user', role: 'writer', emailAddress: 'a@b.com' });
+  });
+});
+
+describe('network failures and getVersion', () => {
+  it('maps a fetch rejection to Offline', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(readJson('f1')).rejects.toBeInstanceOf(Offline);
+    await expect(writeJson('f1', 'a.json', 'p', {})).rejects.toBeInstanceOf(Offline);
+    await expect(ensureFolder('X')).rejects.toBeInstanceOf(Offline);
+  });
+  it('getVersion does a cheap fields=version GET', async () => {
+    fetchMock.mockResolvedValueOnce(json({ version: '9' }));
+    expect(await getVersion('f1')).toBe('9');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://www.googleapis.com/drive/v3/files/f1?fields=version');
   });
 });

@@ -14,11 +14,15 @@ export async function put<T extends Base>(
   table: SyncedTable,
   obj: Omit<T, 'updatedAt' | 'deviceId' | 'deleted' | 'id'> & Partial<Base>,
 ): Promise<T> {
+  const id = obj.id ?? crypto.randomUUID();
+  const deviceId = await getDeviceId();
+  const existing = obj.id ? await tbl(table).get(id) : undefined;
   const row = {
     ...obj,
-    id: obj.id ?? crypto.randomUUID(),
-    updatedAt: Date.now(),
-    deviceId: await getDeviceId(),
+    id,
+    // monotonic: never stamp a row older than (or equal to) what is already stored
+    updatedAt: existing ? Math.max(Date.now(), existing.updatedAt + 1) : Date.now(),
+    deviceId,
     deleted: obj.deleted ?? false,
   } as unknown as T;
   await tbl(table).put(row as never);
