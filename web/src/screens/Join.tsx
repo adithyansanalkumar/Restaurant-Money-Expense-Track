@@ -3,11 +3,10 @@ import { Glass } from '../ui/Glass';
 import type { Route } from '../ui/router';
 import { t, useLanguage } from '../i18n';
 import { primaryBtn } from '../lock/PinPad';
-import { isConsentRequired, useSignIn } from '../ui/useSignIn';
-import { ConsentNotice } from '../ui/ConsentNotice';
+import { useSignIn } from '../ui/useSignIn';
+import { SignInPrompts } from '../ui/ConsentNotice';
 import { currentEmail } from '../sync/auth';
-import { JOIN_MODE, NoLedger, openShared } from '../sync/share';
-import { db } from '../db/db';
+import { JOIN_MODE, openShared } from '../sync/share';
 import { useSettings } from '../settings/store';
 import { errorText, iconTile, linkBtn, mutedText, noticeText, screenCol, screenTitle } from '../ui/styles';
 
@@ -17,7 +16,8 @@ const isNamed = (e: unknown, name: string) => (e as Error | undefined)?.name ===
 export function Join({ onGo }: { onGo: (r: Route) => void }) {
   useLanguage();
   const { device, saveDevice } = useSettings();
-  const { run, busy: signingIn, consent } = useSignIn();
+  const s = useSignIn();
+  const signingIn = s.busy;
   const [email, setEmail] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +28,12 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
     return () => { live = false; };
   }, []);
 
-  const doSignIn = async () => {
+  const doSignIn = async (viaReset = false) => {
     setError(null);
-    try { setEmail((await run()).email); } catch (e) { if (!isConsentRequired(e)) setError(t('auth.error')); }
+    try {
+      const r = viaReset ? await s.resetAndRetry() : await s.run();
+      if (r) setEmail(r.email);
+    } catch { setError(t('auth.error')); }
   };
 
   const choose = async () => {
@@ -39,12 +42,11 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
     setWorking(true);
     try {
       await openShared();
-      if (!(await db.settings.get('shared'))) { setError(t('join.noRestaurant')); return; }
       await saveDevice({ appLanguage: device.appLanguage });
       onGo('home');
     } catch (e) {
       if (isNamed(e, 'PickerCancelled')) return;
-      setError(e instanceof NoLedger || isNamed(e, 'NoLedger') ? t('join.noLedger') : t('join.error'));
+      setError(isNamed(e, 'NoLedger') ? t('join.noLedger') : isNamed(e, 'NoRestaurant') ? t('join.noRestaurant') : t('join.error'));
     } finally {
       setWorking(false);
     }
@@ -69,7 +71,7 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
               </button>
             </>
           : <button type="button" style={primaryBtn} disabled={signingIn} onClick={() => void doSignIn()}>{t('auth.signIn')}</button>}
-        {consent && !email && <ConsentNotice disabled={signingIn} onContinue={() => void doSignIn()} />}
+        {!email && <SignInPrompts s={s} onContinue={() => void doSignIn()} onReset={() => void doSignIn(true)} />}
         {working && <div role="status" style={noticeText}>{t('join.working')}</div>}
         {error && <div role="alert" style={errorText}>{error}</div>}
       </Glass>

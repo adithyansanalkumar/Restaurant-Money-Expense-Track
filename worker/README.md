@@ -1,7 +1,11 @@
 # Sign-in helper (Cloudflare Worker)
 
 Keeps the Google refresh token server-side (AES-GCM encrypted in KV) so the PWA can stay signed in.
-Endpoints: `POST /exchange`, `POST /refresh`, `POST /revoke`.
+Endpoints: `POST /exchange`, `POST /refresh`, `POST /revoke` (sign out this phone: deletes only its
+session), `POST /disconnect` (revokes the Google grant for the account: signs out all its phones).
+
+Storage: one refresh token per Google account (`a:<sha256(sub)>`) shared by that account's phones,
+and one entry per phone session (`s:<sha256(session)>` → the account). Both are AES-GCM encrypted.
 
 ## Deploy
 
@@ -35,9 +39,11 @@ Wrangler prints the worker URL (`https://resto-auth.<you>.workers.dev`). Put it 
 every request fail with `500 server_error`.
 
 Behaviour notes:
-- Stored sessions expire after 180 days without use; each successful `/refresh` renews the expiry.
-- If Google returns no refresh token (the app was approved before), `/exchange` revokes the grant and
-  answers `409 consent_required`; the app then re-runs sign-in once and Google asks for consent again.
+- Stored sessions and account tokens expire after 180 days without use; each successful `/refresh`
+  renews both.
+- Google sends a refresh token only on first consent. A second phone of the same account reuses the
+  stored one. If none is stored, `/exchange` revokes the grant and answers `409 consent_required`;
+  the app asks the user to tap "Continue with Google" and Google asks for consent again.
 - Unexpected failures answer `500 {"error":"server_error"}` (with CORS headers, no details).
 
 Keep `ENC_KEY` safe: if it changes, every stored session becomes unreadable and users must sign in again.

@@ -32,7 +32,8 @@ beforeEach(async () => {
   signIn.mockReset();
 });
 
-test('authNeeded shows a "Sign in to sync" button that signs in and then syncs', async () => {
+test('authNeeded shows a "Sign in to sync" button that signs in, adopts or claims the ledger, then syncs', async () => {
+  await db.settings.put({ id: 'shared', updatedAt: 1, deviceId: 'd', deleted: false, restaurantName: 'R', country: 'FR', currency: 'EUR', billLanguage: 'fra', taxView: 'incl', photoBackup: false, ocrMode: 'device' });
   getAccessToken.mockRejectedValue(new AuthNeeded());
   render(<SyncStatus />);
   await act(async () => { await syncNow(); });
@@ -42,6 +43,8 @@ test('authNeeded shows a "Sign in to sync" button that signs in and then syncs',
   fireEvent.click(btn);
   await waitFor(() => expect(screen.getByText(/^Synced /)).toBeTruthy());
   expect(signIn).toHaveBeenCalledTimes(1);
+  const { findFolder } = await import('../sync/drive');
+  expect(findFolder).toHaveBeenCalledWith('Restaurant Accounts'); // no ledger chosen: adoption lookup first
   expect(screen.queryByRole('button', { name: 'Sign in to sync' })).toBeNull();
 });
 

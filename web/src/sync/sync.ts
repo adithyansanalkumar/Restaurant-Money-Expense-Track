@@ -3,11 +3,12 @@ import type { Table, Transaction } from 'dexie';
 import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
 import type { Base, SharedSettings } from '../domain/types';
-import { AuthNeeded, Offline, currentEmail, getAccessToken, onAccountChange } from './auth';
+import { AuthNeeded, Offline, currentEmail, getAccessToken, onAccountChange, signOut } from './auth';
 import { ensureFolder, findFile, findFolder, getVersion, listFiles, readJson, writeJson } from './drive';
 import { LEDGER_TABLES, emptyLedger, merge, parseLedger, wins, canonical, type Ledger, type LedgerTable } from './merge';
 
-export type SyncStatusCode = 'ok' | 'offline' | 'authNeeded' | 'error';
+/** 'pending': signed in but adoptPending is set; nothing synced until adoption / join settles it. */
+export type SyncStatusCode = 'ok' | 'offline' | 'authNeeded' | 'error' | 'pending';
 export interface SyncResult { status: SyncStatusCode; at: number; message?: string }
 export interface SyncState {
   status: SyncStatusCode | 'idle';
@@ -180,7 +181,9 @@ class Superseded extends Error {
   constructor() { super('The ledger changed during sync'); this.name = 'Superseded'; }
 }
 
-async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
+async function doSync(bypassPending: boolean): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
+  // signed in without a chosen ledger yet: no Drive calls until adoption / join decides (adoptPending)
+  if (!bypassPending && (await db.meta.get('adoptPending'))?.value) return { status: 'pending' };
   const gen = generation;
   // every meta/local write below checks this first: after a reset, the old ledger is not ours any more
   const live = () => { if (gen !== generation) throw new Superseded(); };
@@ -257,13 +260,17 @@ let running: Promise<SyncResult> | null = null;
 
 /** Never throws. Only one sync at a time: a call while one runs returns the running promise. */
 export function syncNow(): Promise<SyncResult> {
+  return runSync(false);
+}
+
+function runSync(bypassPending: boolean): Promise<SyncResult> {
   if (running) return running;
   setState({ running: true });
   const p = (async (): Promise<SyncResult> => {
     let r: Omit<SyncResult, 'at'> & { at?: number };
     let superseded = false;
     try {
-      r = await doSync();
+      r = await doSync(bypassPending);
     } catch (e) {
       if (e instanceof Superseded) { superseded = true; r = { status: 'error', message: e.message }; }
       else if (isErr(e, AuthNeeded, 'AuthNeeded')) r = { status: 'authNeeded' };
@@ -272,8 +279,8 @@ export function syncNow(): Promise<SyncResult> {
     }
     const result: SyncResult = { ...r, at: r.at ?? Date.now() };
     running = null;
-    if (superseded) {
-      // reset while running: leave the reset state (idle, no retry) as it is
+    if (superseded || r.status === 'pending') {
+      // reset while running: leave the reset state (idle, no retry) as it is; pending: nothing happened
       setState({ running: false });
       return result;
     }
@@ -286,10 +293,43 @@ export function syncNow(): Promise<SyncResult> {
   return p;
 }
 
-/** A sync that starts after any running one finished (so it sees a ref stored just now). */
-export async function syncFresh(): Promise<SyncResult> {
+/**
+ * A sync that starts after any running one finished (so it sees a ref stored just now).
+ * bypassPending: adoption / join syncing the ledger they just chose while adoptPending is still set.
+ */
+export async function syncFresh(bypassPending = false): Promise<SyncResult> {
   while (running) await running;
-  return syncNow();
+  return runSync(bypassPending);
+}
+
+export const clearAdoptPending = (): Promise<void> => db.meta.delete('adoptPending');
+export const isAdoptPending = async (): Promise<boolean> => !!(await db.meta.get('adoptPending'))?.value;
+
+/** Bump the generation (a running sync can't write any more) and stop timers. Adoption / join start with it. */
+export function interruptSync(): void {
+  resetTimers();
+}
+
+/**
+ * "Reset this phone" (switching to another Google account): signs out here, then erases the synced
+ * tables, photos and ledger meta RAW (no hooks, no tombstones). Keeps device settings and the PIN.
+ * The caller reloads settings when it is done.
+ */
+export async function resetPhone(): Promise<void> {
+  resetTimers();
+  await signOut();
+  const tables = [...LEDGER_TABLES.map(tbl), db.photos, db.meta];
+  await db.transaction('rw', tables, async (tx) => {
+    applyingTx = tx;
+    try {
+      for (const t of LEDGER_TABLES) await tbl(t).clear();
+      await db.photos.clear();
+      await db.meta.bulkDelete(['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth']);
+    } finally {
+      applyingTx = null;
+    }
+  });
+  setState({ revision: state.revision + 1 });
 }
 
 // ---------------- scheduling ----------------

@@ -256,4 +256,13 @@ export const en = {
   'lock.forgot': "Forgot PIN?",
   'lock.forgotMismatch': "That’s not the account this app uses ({email}). Still locked.",
   'lock.forgotError': "Could not sign in. Still locked.",
+  'welcome.driveError': "Couldn’t reach Google Drive — try again",
+  'welcome.retry': "Try again",
+  'welcome.useWithout': "Use without Google",
+  'welcome.continueAs': "Continue as {email}",
+  'switch.title': "This phone holds another account’s restaurant. Reset this phone to use {email}?",
+  'switch.reset': "Reset this phone",
+  'switch.cancel': "Cancel",
+  'share.pending': "Your Google Drive couldn’t be checked yet, so nothing is syncing.",
+  'share.retry': "Try again",
 } as const;

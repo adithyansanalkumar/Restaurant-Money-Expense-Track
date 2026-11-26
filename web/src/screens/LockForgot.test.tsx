@@ -13,6 +13,12 @@ vi.mock('../sync/auth', async (orig) => ({
   ...(await orig<typeof import('../sync/auth')>()),
   signIn: (o?: unknown) => signIn(o),
 }));
+// Forgot PIN goes through signInLater (adoption when no ledger is chosen); no Drive here
+const later = vi.hoisted(() => vi.fn());
+vi.mock('../sync/onboard', () => ({
+  adoptExistingLedger: async () => 'none',
+  signInLater: async (o?: unknown) => { later(o); return { ...(await signIn(o)), result: 'kept' }; },
+}));
 
 import { App } from '../App';
 import { EmailMismatch } from '../sync/auth';
@@ -41,6 +47,7 @@ test('Forgot PIN: signing in with the same account clears the PIN and unlocks', 
   fireEvent.click(await screen.findByRole('button', { name: 'Forgot PIN?' }));
   expect(await screen.findByText('Recent activity')).toBeTruthy();
   expect(signIn).toHaveBeenCalledWith(expect.objectContaining({ expectEmail: 'dad@x.com' }));
+  expect(later).toHaveBeenCalledWith(expect.objectContaining({ expectEmail: 'dad@x.com' }));
   expect(await hasPin()).toBe(false);
 });
 

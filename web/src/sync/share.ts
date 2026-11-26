@@ -2,12 +2,14 @@ import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
 import { Offline, currentEmail, getAccessToken } from './auth';
 import { ensureFolder, findFile, shareFile, shareFolder, type Id } from './drive';
-import { FOLDER_NAME, LEDGER_NAME, dropLocalShared, resetLedgerState, restoreLocalShared, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
+import { FOLDER_NAME, LEDGER_NAME, clearAdoptPending, dropLocalShared, resetLedgerState, restoreLocalShared, resolveLedgerRef, setLedgerRef, syncFresh, type LedgerRef, type SyncStatusCode } from './sync';
 
 /**
  * How Join picks the shared ledger: 'file' = pick ledger.json itself; 'folder' = pick the shared
  * "Restaurant Accounts" folder, then find ledger.json in it.
  */
+// 'folder' caveat: with the drive.file scope, picking a folder may not grant access to the files
+// inside it (ledger.json), so findFile can come back empty. 'file' is the safe default.
 export const JOIN_MODE: 'file' | 'folder' = 'file';
 
 const PICKER_JS = 'https://apis.google.com/js/api.js';
@@ -25,6 +27,10 @@ export class PickerCancelled extends Error {
 }
 export class NoLedger extends Error {
   constructor() { super('No ledger.json found'); this.name = 'NoLedger'; }
+}
+/** The joined ledger has no restaurant (shared settings) in it. */
+export class NoRestaurant extends Error {
+  constructor() { super('That ledger has no restaurant yet'); this.name = 'NoRestaurant'; }
 }
 export class JoinSyncFailed extends Error {
   constructor(public status: SyncStatusCode) { super(`Could not sync the shared ledger (${status})`); this.name = 'JoinSyncFailed'; }
@@ -135,8 +141,8 @@ async function pick(mode: 'file' | 'folder', token: string): Promise<string> {
  * Join: pick the shared ledger (JOIN_MODE), store it as a joined ref (dropping the old ref and
  * last-sync), then sync it down. Never writes shared settings: they come from the ledger. A local
  * shared row (phone used signed out) is removed raw first; other local rows merge in. If the sync
- * fails, that row is put back and the joined ref dropped.
- * Throws PickerCancelled, NoLedger or JoinSyncFailed.
+ * fails, or the ledger has no restaurant, that row is put back and the joined ref dropped.
+ * Clears adoptPending on success. Throws PickerCancelled, NoLedger, NoRestaurant or JoinSyncFailed.
  */
 export async function openShared(mode: 'file' | 'folder' = JOIN_MODE): Promise<void> {
   const token = await getAccessToken();
@@ -149,15 +155,24 @@ export async function openShared(mode: 'file' | 'folder' = JOIN_MODE): Promise<v
   } else {
     ref = { fileId: id, joined: true };
   }
-  await resetLedgerState();
+  await resetLedgerState(); // bumps the generation: nothing earlier may write from here on
+  const dropped = await dropLocalShared(); // before the ref exists, so no sync can push it
   await setLedgerRef(ref);
-  const dropped = await dropLocalShared();
-  const r = await syncFresh();
-  if (r.status !== 'ok') {
+  const r = await syncFresh(true);
+  const rollback = async () => {
     await resetLedgerState();
     if (dropped) await restoreLocalShared(dropped);
     await reloadSettings();
+  };
+  if (r.status !== 'ok') {
+    await rollback();
     throw new JoinSyncFailed(r.status);
   }
+  const shared = await db.settings.get('shared');
+  if (!shared || shared.deleted) {
+    await rollback();
+    throw new NoRestaurant();
+  }
+  await clearAdoptPending();
   await reloadSettings();
 }

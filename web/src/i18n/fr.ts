@@ -258,4 +258,13 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'lock.forgot': "Code PIN oublié ?",
   'lock.forgotMismatch': "Ce n’est pas le compte utilisé par l’application ({email}). Toujours verrouillé.",
   'lock.forgotError': "Connexion impossible. Toujours verrouillé.",
+  'welcome.driveError': "Impossible de joindre Google Drive — réessayez",
+  'welcome.retry': "Réessayer",
+  'welcome.useWithout': "Utiliser sans Google",
+  'welcome.continueAs': "Continuer en tant que {email}",
+  'switch.title': "Ce téléphone contient le restaurant d’un autre compte. Réinitialiser ce téléphone pour utiliser {email} ?",
+  'switch.reset': "Réinitialiser ce téléphone",
+  'switch.cancel': "Annuler",
+  'share.pending': "Votre Google Drive n’a pas encore pu être vérifié : rien ne se synchronise.",
+  'share.retry': "Réessayer",
 };

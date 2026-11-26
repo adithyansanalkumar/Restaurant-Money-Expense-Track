@@ -8,15 +8,22 @@ import { reloadSettings } from '../settings/store';
 vi.mock('../domain/clock', () => ({ todayISO: () => '2026-11-25' }));
 const auth = vi.hoisted(() => ({
   signIn: vi.fn(),
+  signOut: vi.fn(),
   email: null as string | null,
 }));
 vi.mock('../sync/auth', async (orig) => ({
   ...(await orig<typeof import('../sync/auth')>()),
   signIn: (o?: unknown) => auth.signIn(o),
+  signOut: () => auth.signOut(),
   currentEmail: async () => auth.email,
 }));
+const resetPhone = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../sync/sync', async (orig) => ({ ...(await orig<typeof import('../sync/sync')>()), resetPhone: () => resetPhone() }));
 const adopt = vi.hoisted(() => vi.fn());
-vi.mock('../sync/onboard', () => ({ adoptExistingLedger: () => adopt() }));
+vi.mock('../sync/onboard', () => ({
+  adoptExistingLedger: () => adopt(),
+  signInLater: async (o?: unknown) => { const { email } = await auth.signIn(o); return { email, result: await adopt() }; },
+}));
 
 import { App } from '../App';
 
@@ -27,6 +34,8 @@ beforeEach(async () => {
   auth.email = null;
   auth.signIn.mockReset().mockImplementation(async () => { auth.email = 'dad@x.com'; return { email: 'dad@x.com' }; });
   adopt.mockReset();
+  auth.signOut.mockReset().mockImplementation(async () => { auth.email = null; });
+  resetPhone.mockClear();
   window.location.hash = '';
 });
 
@@ -68,8 +77,44 @@ test('a ledger exists but the sync failed: stays on Welcome with an error, never
   adopt.mockResolvedValue('offline');
   render(<App />);
   fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
-  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(await screen.findByText('Couldn’t reach Google Drive — try again')).toBeTruthy();
   expect(screen.queryByText('Set up your restaurant')).toBeNull();
+  // signed in with the lookup not done: no "Not now" into Setup
+  expect(screen.queryByRole('button', { name: 'Not now' })).toBeNull();
+  // Retry runs the lookup again without another popup
+  adopt.mockResolvedValueOnce('none');
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  expect(await screen.findByText('Set up your restaurant')).toBeTruthy();
+  expect(auth.signIn).toHaveBeenCalledTimes(1);
+  expect(adopt).toHaveBeenCalledTimes(2);
+});
+
+test('after a failed lookup, "Use without Google" signs out first, then Setup', async () => {
+  adopt.mockResolvedValue('error');
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Use without Google' }));
+  expect(await screen.findByText('Set up your restaurant')).toBeTruthy();
+  expect(auth.signOut).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/Signed in as/)).toBeNull();
+});
+
+test('another account than this phone\'s: Reset this phone / Cancel', async () => {
+  const { AccountSwitch } = await import('../sync/auth');
+  auth.signIn.mockRejectedValueOnce(new AccountSwitch('new@x.com'));
+  adopt.mockResolvedValue('none');
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  expect(await screen.findByText('This phone holds another account’s restaurant. Reset this phone to use new@x.com?')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByText(/Reset this phone to use/)).toBeNull());
+  expect(resetPhone).not.toHaveBeenCalled();
+  auth.signIn.mockRejectedValueOnce(new AccountSwitch('new@x.com'));
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in with Google' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Reset this phone' }));
+  expect(await screen.findByText('Set up your restaurant')).toBeTruthy();
+  expect(resetPhone).toHaveBeenCalledTimes(1);
+  expect(auth.signIn).toHaveBeenCalledTimes(3); // signed in again after the reset
 });
 
 test('consent_required: shows "Please approve access again" and a Continue with Google button that signs in from the tap', async () => {

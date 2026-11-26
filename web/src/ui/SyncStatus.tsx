@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { signIn } from '../sync/auth';
-import { syncNow, useSyncStatus } from '../sync/sync';
+import { useSyncStatus } from '../sync/sync';
 import { t, useLanguage } from '../i18n';
+import { useSignInLater } from './useSignIn';
+import { SignInPrompts } from './ConsentNotice';
 
 function when(at: number, lang: string): string {
   const d = new Date(at);
@@ -13,16 +13,20 @@ function when(at: number, lang: string): string {
 export function SyncStatus({ style }: { style?: React.CSSProperties }) {
   const lang = useLanguage();
   const { status, at, running } = useSyncStatus();
-  const [signingIn, setSigningIn] = useState(false);
+  // signInLater: syncs the chosen ledger, or adopts this account's one first when none is chosen
+  const s = useSignInLater();
+  const go = async (viaReset = false) => {
+    try { await (viaReset ? s.resetAndRetry() : s.run()); } catch (e) { console.warn('[sync] sign-in failed', e); }
+  };
   const base: React.CSSProperties = { fontSize: 12, color: '#C6D8E6', ...style };
 
+  const prompts = <SignInPrompts s={s} onContinue={() => void go()} onReset={() => void go(true)} />;
+  if (s.consent || s.switchTo) return <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{prompts}</div>;
   if (running) return <div role="status" style={base}>{t('sync.syncing')}</div>;
   if (status === 'authNeeded') {
     return (
-      <button type="button" disabled={signingIn} onClick={async () => {
-        setSigningIn(true);
-        try { await signIn(); await syncNow(); } catch (e) { console.warn('[sync] sign-in failed', e); } finally { setSigningIn(false); }
-      }} style={{ ...base, minHeight: 44, border: 0, background: 'transparent', color: '#8FD8F2', fontWeight: 600, padding: 0, textAlign: 'left' }}>
+      <button type="button" disabled={s.busy} onClick={() => void go()}
+        style={{ ...base, minHeight: 44, border: 0, background: 'transparent', color: '#8FD8F2', fontWeight: 600, padding: 0, textAlign: 'left' }}>
         {t('sync.signIn')}
       </button>
     );

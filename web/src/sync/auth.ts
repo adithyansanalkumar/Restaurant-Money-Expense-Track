@@ -18,6 +18,14 @@ export class EmailMismatch extends Error {
   constructor(public email: string) { super('Signed in with a different account'); this.name = 'EmailMismatch'; }
 }
 
+/**
+ * signIn got a different Google account than the one this phone's books belong to (meta 'account').
+ * Nothing was stored (the new session is revoked). The UI offers "Reset this phone".
+ */
+export class AccountSwitch extends Error {
+  constructor(public email: string) { super('This phone holds another account’s restaurant'); this.name = 'AccountSwitch'; }
+}
+
 export interface SignInOptions {
   /** Only accept this account (Forgot PIN). A different one is revoked and EmailMismatch thrown. */
   expectEmail?: string;
@@ -28,7 +36,10 @@ const SCOPE = 'openid email https://www.googleapis.com/auth/drive.file';
 const EXPIRY_MARGIN_MS = 60_000;
 
 interface StoredAuth { session: string; email: string }
-/** meta 'account': the last signed-in account, kept after its session expires, so a switch is detected. */
+/**
+ * meta 'account': the account this phone's books belong to. Kept after its session expires and after
+ * sign-out, so signing in with another account is refused (AccountSwitch) until the phone is reset.
+ */
 interface StoredAccount { email: string }
 
 const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -116,19 +127,23 @@ export async function signIn(opts: SignInOptions = {}): Promise<{ email: string 
     await revokeSession(d.session);
     throw new EmailMismatch(d.email);
   }
+  const last = (await db.meta.get('account'))?.value as StoredAccount | undefined;
+  if (last && !sameEmail(last.email, d.email)) {
+    await revokeSession(d.session);
+    throw new AccountSwitch(d.email);
+  }
   epoch++;
   refreshing = null;
   const old = await readAuth();
   if (old && old.session !== d.session) await revokeSession(old.session);
-  const last = (await db.meta.get('account'))?.value as StoredAccount | undefined;
-  const switched = !!last && !sameEmail(last.email, d.email);
   await db.transaction('rw', db.meta, async () => {
-    if (switched) await db.meta.bulkDelete(['ledgerRef', 'lastSync']);
     await db.meta.put({ key: 'auth', value: { session: d.session, email: d.email } satisfies StoredAuth });
     await db.meta.put({ key: 'account', value: { email: d.email } satisfies StoredAccount });
+    // No ledger chosen yet: this account may already have one. Background sync waits (adoptPending)
+    // until adoptExistingLedger / openShared settled it, so local shared settings can't be pushed.
+    if (!(await db.meta.get('ledgerRef'))) await db.meta.put({ key: 'adoptPending', value: true });
   });
   cached = { token: d.accessToken, expiresAt: Date.now() + d.expiresIn * 1000 };
-  if (switched) notifyAccountChange();
   return { email: d.email };
 }
 
@@ -171,12 +186,25 @@ async function refresh(myEpoch: number): Promise<string> {
   return d.accessToken;
 }
 
+/** Sign out this phone (its session only; the account's other phones stay signed in). Keeps meta 'account'. */
 export async function signOut(): Promise<void> {
+  await endSession('/revoke');
+}
+
+/** Revoke this app's Google access for the account (signs out all its phones), then sign out here. */
+export async function disconnectGoogle(): Promise<void> {
+  await endSession('/disconnect');
+}
+
+async function endSession(path: '/revoke' | '/disconnect'): Promise<void> {
   epoch++;
   refreshing = null;
   cached = null;
-  const auth = await readAuth();
-  if (auth) await revokeSession(auth.session);
-  await db.meta.bulkDelete(['auth', 'account', 'ledgerRef', 'lastSync']);
+  // first, so sync bumps its generation before the meta goes: an in-flight sync can't write it back
   notifyAccountChange();
+  const auth = await readAuth();
+  if (auth) {
+    try { await post(path, { session: auth.session }); } catch { /* best effort */ }
+  }
+  await db.meta.bulkDelete(['auth', 'ledgerRef', 'lastSync', 'adoptPending']);
 }

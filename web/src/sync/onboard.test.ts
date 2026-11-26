@@ -21,10 +21,11 @@ const drive = {
 };
 vi.mock('./drive', () => Object.fromEntries(['ensureFolder', 'findFolder', 'listFiles', 'findFile', 'readJson', 'getVersion', 'writeJson'].map((k) => [k, (...a: unknown[]) => (drive as any)[k](...a)])));
 const signOut = vi.fn(async () => {});
-vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: async () => 'TOK', currentEmail: async () => 'dad@x.com', signOut: () => signOut() }));
+const signIn = vi.fn(async (_o?: unknown) => ({ email: 'dad@x.com' }));
+vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: async () => 'TOK', currentEmail: async () => 'dad@x.com', signOut: () => signOut(), signIn: (o?: unknown) => signIn(o) }));
 
-import { adoptExistingLedger } from './onboard';
-import { stopSync } from './sync';
+import { adoptExistingLedger, signInLater } from './onboard';
+import { stopSync, syncNow } from './sync';
 
 const ledger: Ledger = {
   schema: 1, entries: [], payments: [], suppliers: [],
@@ -91,14 +92,72 @@ describe('a "Not now" phone signing in later', () => {
     expect(pushed.settings).toEqual(ledger.settings);
     expect(pushed.entries.map((e) => e.id)).toEqual(['offline1']);
   });
-  it('the sync fails: the local row is restored and the phone is signed out (no later sync can push it)', async () => {
+  it('the sync fails: the local row is restored, the ref dropped and adoptPending kept (background sync stays off)', async () => {
     await localData();
+    await db.meta.put({ key: 'adoptPending', value: true });
     drive.findFolder.mockResolvedValue('F');
     drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
     drive.readJson.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'Offline' }));
     expect(await adoptExistingLedger()).toBe('offline');
     expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Local' });
     expect(await db.meta.get('ledgerRef')).toBeUndefined();
-    expect(signOut).toHaveBeenCalled();
+    expect((await db.meta.get('adoptPending'))?.value).toBe(true);
+    expect(signOut).not.toHaveBeenCalled();
+    drive.readJson.mockClear();
+    expect((await syncNow()).status).toBe('pending');
+    expect(drive.readJson).not.toHaveBeenCalled();
+  });
+  it('adopted: adoptPending cleared', async () => {
+    await db.meta.put({ key: 'adoptPending', value: true });
+    files.set('L', { data: ledger, version: 9 });
+    drive.findFolder.mockResolvedValue('F');
+    drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
+    expect(await adoptExistingLedger()).toBe('adopted');
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+  });
+  it('no ledger: this phone is the owner (ownerEmail on the local restaurant) and adoptPending cleared', async () => {
+    await localData();
+    await db.meta.put({ key: 'adoptPending', value: true });
+    expect(await adoptExistingLedger()).toBe('none');
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Local', ownerEmail: 'dad@x.com' });
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+  });
+  it('a ledger with no restaurant in it: rolls back to the local row as owner (none)', async () => {
+    await localData();
+    files.set('L', { data: { ...ledger, settings: [] }, version: 9 });
+    drive.findFolder.mockResolvedValue('F');
+    drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
+    expect(await adoptExistingLedger()).toBe('none');
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Local', ownerEmail: 'dad@x.com' });
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+  });
+  it('lookup fails: adoptPending kept, nothing written', async () => {
+    await db.meta.put({ key: 'adoptPending', value: true });
+    drive.findFolder.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'Offline' }));
+    expect(await adoptExistingLedger()).toBe('offline');
+    expect((await db.meta.get('adoptPending'))?.value).toBe(true);
+  });
+});
+
+describe('signInLater', () => {
+  it('no ledger chosen: signs in, then adopts', async () => {
+    files.set('L', { data: ledger, version: 9 });
+    drive.findFolder.mockResolvedValue('F');
+    drive.findFile.mockResolvedValue({ id: 'L', version: '9' });
+    expect(await signInLater({ expectEmail: 'dad@x.com' })).toEqual({ email: 'dad@x.com', result: 'adopted' });
+    expect(signIn).toHaveBeenCalledWith({ expectEmail: 'dad@x.com' });
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Chez Dad' });
+  });
+  it('a ledger already chosen: signs in and syncs, no adoption lookup', async () => {
+    files.set('L', { data: ledger, version: 9 });
+    await db.meta.put({ key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } });
+    expect(await signInLater()).toEqual({ email: 'dad@x.com', result: 'kept' });
+    expect(drive.findFolder).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(drive.readJson).toHaveBeenCalledWith('L'));
+  });
+  it('sign-in errors propagate (ConsentRequired / AccountSwitch are handled by the UI)', async () => {
+    const { AccountSwitch } = await import('./auth');
+    signIn.mockRejectedValueOnce(new AccountSwitch('x@y.com'));
+    await expect(signInLater()).rejects.toBeInstanceOf(AccountSwitch);
   });
 });

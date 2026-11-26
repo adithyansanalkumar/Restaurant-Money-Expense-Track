@@ -15,7 +15,10 @@ vi.mock('../sync/auth', async (orig) => ({
   signIn: (o?: unknown) => auth.signIn(o),
 }));
 const adopt = vi.hoisted(() => vi.fn());
-vi.mock('../sync/onboard', () => ({ adoptExistingLedger: () => adopt() }));
+vi.mock('../sync/onboard', () => ({
+  adoptExistingLedger: () => adopt(),
+  signInLater: async (o?: unknown) => { const { email } = await auth.signIn(o); return { email, result: await adopt() }; },
+}));
 
 import { SharePanel } from './SharePanel';
 
@@ -61,14 +64,14 @@ test('Sign out calls signOut', async () => {
   await waitFor(() => expect(auth.signOut).toHaveBeenCalled());
 });
 
-test('signing in later with no remote ledger makes this phone the owner (ownerEmail set)', async () => {
+test('signing in later with no remote ledger: adoption decides (ownerEmail is written by adoptExistingLedger) and Share appears', async () => {
   await saveShared({ restaurantName: 'Local' });
   auth.email = null;
   auth.signIn.mockImplementation(async () => { auth.email = 'adi@x.com'; return { email: 'adi@x.com' }; });
   adopt.mockResolvedValue('none');
   render(<SharePanel />);
   fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
-  await waitFor(async () => expect((await db.settings.get('shared'))?.ownerEmail).toBe('adi@x.com'));
+  await waitFor(() => expect(adopt).toHaveBeenCalled());
   expect(await screen.findByText('Share with someone')).toBeTruthy();
 });
 

@@ -62,7 +62,7 @@ vi.mock('./auth', async (orig) => ({
 }));
 
 import { AuthNeeded, Offline } from './auth';
-import { _pendingSync, _retryDelay, getSyncState, resetLedgerState, scheduleSync, startSync, stopSync, syncNow } from './sync';
+import { _pendingSync, _retryDelay, getSyncState, resetLedgerState, resetPhone, scheduleSync, startSync, stopSync, syncFresh, syncNow } from './sync';
 import { signOut } from './auth';
 
 const empty = (): Ledger => ({ schema: 1, entries: [], payments: [], suppliers: [], categories: [], settings: [] });
@@ -431,6 +431,57 @@ describe('retries', () => {
     await p;
     expect(await db.meta.get('ledgerRef')).toBeUndefined();
     expect(await db.meta.get('lastSync')).toBeUndefined();
+  });
+
+  it('adoptPending: syncNow makes no Drive calls, arms no retry and is not authNeeded; syncFresh(true) bypasses', async () => {
+    files.set('ledger1', { version: 1, data: empty() });
+    await db.meta.put({ key: 'adoptPending', value: true });
+    await startSync(); // signed in: its first sync is skipped too
+    const r = await syncNow();
+    expect(r.status).toBe('pending');
+    expect(getAccessToken).not.toHaveBeenCalled();
+    for (const f of Object.values(drive)) expect(f).not.toHaveBeenCalled();
+    expect(_retryDelay()).toBeNull();
+    expect(getSyncState().status).not.toBe('authNeeded');
+    expect((await syncFresh(true)).status).toBe('ok');
+    expect(drive.readJson).toHaveBeenCalled();
+  });
+
+  it('a sync in flight across signOut does not write the old ledgerRef back (generation bumped first)', async () => {
+    let release!: () => void;
+    files.set('ledger1', { version: 1, data: empty() });
+    drive.readJson.mockImplementationOnce(async (id: string) => { await new Promise<void>((r) => { release = r; }); return readImpl(id); });
+    const p = syncNow();
+    await vi.waitFor(() => expect(drive.readJson).toHaveBeenCalled());
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+    await db.meta.put({ key: 'auth', value: { session: 'S', email: 'a@b.com' } });
+    await signOut();
+    vi.unstubAllGlobals();
+    release();
+    await p;
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(await db.meta.get('lastSync')).toBeUndefined();
+  });
+
+  it('resetPhone erases synced tables, photos and ledger meta raw; keeps device settings and the PIN', async () => {
+    await startSync();
+    await put<Supplier>('suppliers', { id: 'L1', name: 'Local' });
+    await db.settings.put({ id: 'shared', updatedAt: 1, deviceId: 'd', deleted: false } as any);
+    await db.photos.put({ id: 'p1', blob: new Blob(['x']), createdAt: 1, backedUp: false });
+    await db.meta.bulkPut([
+      { key: 'device', value: { appLanguage: 'fr', weekStart: 1 } }, { key: 'lock', value: { salt: 's' } },
+      { key: 'ledgerRef', value: { folderId: 'f', fileId: 'l' } }, { key: 'lastSync', value: { at: 1 } },
+      { key: 'account', value: { email: 'a@b.com' } }, { key: 'adoptPending', value: true },
+    ]);
+    await new Promise((r) => setTimeout(r, 0));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+    await resetPhone();
+    vi.unstubAllGlobals();
+    for (const t of ['entries', 'payments', 'suppliers', 'categories', 'settings', 'photos'] as const) expect(await db[t].count()).toBe(0);
+    const left = (await db.meta.toArray()).map((m) => m.key);
+    expect(left).toEqual(expect.arrayContaining(['device', 'lock']));
+    for (const k of ['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth']) expect(left).not.toContain(k);
+    expect(_pendingSync()).toBe(false); // no tombstones / hooks scheduled a sync
   });
 
   it('authNeeded does not retry', async () => {

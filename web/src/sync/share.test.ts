@@ -36,7 +36,7 @@ vi.mock('./auth', async (orig) => ({
   currentEmail: () => currentEmail(),
 }));
 
-import { InvalidEmail, NotOwner, inviteByEmail, isOwner, isValidEmail, openShared, ownFolderId, PickerCancelled } from './share';
+import { InvalidEmail, NoRestaurant, NotOwner, inviteByEmail, isOwner, isValidEmail, openShared, ownFolderId, PickerCancelled } from './share';
 import { resolveLedgerRef, stopSync, syncNow } from './sync';
 
 const owned: Ledger = {
@@ -221,5 +221,28 @@ describe('joining from a phone that was used signed out ("Not now")', () => {
     await expect(openShared()).rejects.toThrow();
     expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'My local' });
     expect(await db.meta.get('ledgerRef')).toBeUndefined();
+  });
+});
+
+describe('openShared rollbacks and adoptPending', () => {
+  it('a ledger without a restaurant: NoRestaurant, no joined ref left, local row restored', async () => {
+    await saveShared({ restaurantName: 'Mine' });
+    files.set('sharedLedger', { data: { ...owned, settings: [] }, version: 7 });
+    await expect(openShared()).rejects.toBeInstanceOf(NoRestaurant);
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(await db.settings.get('shared')).toMatchObject({ restaurantName: 'Mine' });
+  });
+  it('joins while adoptPending is set (bypass) and clears it on success', async () => {
+    await db.meta.put({ key: 'adoptPending', value: true });
+    files.set('sharedLedger', { data: owned, version: 7 });
+    await openShared();
+    expect(drive.readJson).toHaveBeenCalledWith('sharedLedger');
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+  });
+  it('a failed join keeps adoptPending', async () => {
+    await db.meta.put({ key: 'adoptPending', value: true });
+    drive.readJson.mockRejectedValueOnce(Object.assign(new Error('x'), { name: 'Offline' }));
+    await expect(openShared()).rejects.toThrow();
+    expect((await db.meta.get('adoptPending'))?.value).toBe(true);
   });
 });

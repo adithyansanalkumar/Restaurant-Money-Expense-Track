@@ -4,8 +4,8 @@ import { t, useLanguage } from '../i18n';
 import { biometricEnabled, checkPin, clearPin, lockoutRemainingMs, unlockBiometric } from '../lock/lock';
 import { PinPad, primaryBtn } from '../lock/PinPad';
 import { currentEmail } from '../sync/auth';
-import { isConsentRequired, useSignIn } from '../ui/useSignIn';
-import { ConsentNotice } from '../ui/ConsentNotice';
+import { useSignInLater } from '../ui/useSignIn';
+import { SignInPrompts } from '../ui/ConsentNotice';
 import { errorText, linkBtn } from '../ui/styles';
 
 const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -20,7 +20,8 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
   // "Forgot PIN?" only when this phone has a Google session to prove who you are.
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
-  const { run: runSignIn, busy: signingIn, consent } = useSignIn();
+  const s = useSignInLater();
+  const signingIn = s.busy;
 
   useEffect(() => {
     let live = true;
@@ -35,12 +36,13 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
     setForgotError(null);
     try {
       // expectEmail: a different account is refused without replacing this phone's session
-      const r = await runSignIn({ expectEmail: authEmail });
+      // signInLater: adopts this account's ledger first when the phone has none chosen
+      const r = await s.run({ expectEmail: authEmail });
+      if (!r) return; // consent prompt shown
       if (!sameEmail(r.email, authEmail)) throw Object.assign(new Error('mismatch'), { name: 'EmailMismatch' });
       await clearPin();
       onUnlock();
     } catch (e) {
-      if (isConsentRequired(e)) return;
       setForgotError((e as Error | undefined)?.name === 'EmailMismatch'
         ? t('lock.forgotMismatch', { email: authEmail })
         : t('lock.forgotError'));
@@ -92,7 +94,7 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
           {authEmail && (
             <button type="button" style={linkBtn} disabled={signingIn} onClick={() => void forgot()}>{t('lock.forgot')}</button>
           )}
-          {consent && <ConsentNotice disabled={signingIn} onContinue={() => void forgot()} />}
+          <SignInPrompts s={s} onContinue={() => void forgot()} onReset={s.cancelSwitch} />
           {forgotError && <div role="alert" style={errorText}>{forgotError}</div>}
         </Glass>
       </div>

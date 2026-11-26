@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { Glass } from '../ui/Glass';
 import { t, useLanguage } from '../i18n';
 import { primaryBtn } from '../lock/PinPad';
-import { isConsentRequired, useSignIn } from '../ui/useSignIn';
-import { ConsentNotice } from '../ui/ConsentNotice';
-import { adoptExistingLedger } from '../sync/onboard';
+import { useSignInLater } from '../ui/useSignIn';
+import { SignInPrompts } from '../ui/ConsentNotice';
+import { adoptExistingLedger, type AdoptResult } from '../sync/onboard';
+import { isAdoptPending } from '../sync/sync';
 import { currentEmail, signOut } from '../sync/auth';
 import { InvalidEmail, inviteByEmail, isOwner } from '../sync/share';
 import { useSettings } from '../settings/store';
@@ -19,8 +20,10 @@ const heading: CSSProperties = { fontSize: 15, fontWeight: 800, color: '#FFFFFF'
  */
 export function SharePanel() {
   useLanguage();
-  const { shared, saveShared } = useSettings();
-  const { run, busy: signingIn, consent } = useSignIn();
+  const { shared } = useSettings();
+  const s = useSignInLater();
+  const signingIn = s.busy;
+  const [pending, setPending] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [owner, setOwner] = useState(false);
   const [invite, setInvite] = useState('');
@@ -29,32 +32,42 @@ export function SharePanel() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
-    const [e, o] = await Promise.all([currentEmail(), isOwner()]);
-    setEmail(e);
-    setOwner(o);
+    try {
+      const [e, o, p] = await Promise.all([currentEmail(), isOwner(), isAdoptPending()]);
+      setEmail(e);
+      setOwner(o);
+      setPending(!!e && p);
+    } catch { /* keep what is shown */ }
   }, []);
-  useEffect(() => { void refresh().catch(() => {}); }, [refresh, shared]);
+  useEffect(() => { void refresh(); }, [refresh, shared]);
 
-  // Signing in later (phone used signed out): an existing ledger for this account is adopted
-  // (never written over); with none, this phone becomes the owner.
-  const doSignIn = async () => {
+  const showResult = (r: AdoptResult | 'kept') => {
+    if (r !== 'adopted' && r !== 'none' && r !== 'kept') setMsg({ ok: false, text: t('welcome.driveError') });
+  };
+  // Signing in later (phone used signed out): signInLater adopts this account's ledger (never
+  // written over) or, with none, makes this phone the owner (ownerEmail).
+  const doSignIn = async (viaReset = false) => {
     setMsg(null);
     setAdopting(true);
     try {
-      const { email: me } = await run();
-      const r = await adoptExistingLedger();
-      if (r === 'none') await saveShared({ ownerEmail: me });
-      else if (r !== 'adopted') setMsg({ ok: false, text: t('welcome.syncError') });
-    } catch (e) {
-      if (!isConsentRequired(e)) setMsg({ ok: false, text: t('auth.error') });
+      const r = viaReset ? await s.resetAndRetry() : await s.run();
+      if (r) showResult(r.result);
+    } catch {
+      setMsg({ ok: false, text: t('auth.error') });
     } finally {
       setAdopting(false);
     }
     await refresh();
   };
+  const retryAdopt = async () => {
+    setMsg(null);
+    setAdopting(true);
+    try { showResult(await adoptExistingLedger()); } catch { setMsg({ ok: false, text: t('welcome.driveError') }); } finally { setAdopting(false); }
+    await refresh();
+  };
   const doSignOut = async () => {
     setMsg(null);
-    await signOut();
+    try { await signOut(); } catch { /* local sign-out still happened */ }
     await refresh();
   };
   const send = async () => {
@@ -85,8 +98,14 @@ export function SharePanel() {
             <div style={{ ...mutedText, textAlign: 'left' }}>{t('share.notSignedIn')}</div>
             <button type="button" style={primaryBtn} disabled={signingIn || adopting} onClick={() => void doSignIn()}>{t('auth.signIn')}</button>
           </>}
-      {consent && !email && <ConsentNotice disabled={signingIn || adopting} onContinue={() => void doSignIn()} />}
-      {email && owner && (
+      {!email && <SignInPrompts s={s} onContinue={() => void doSignIn()} onReset={() => void doSignIn(true)} />}
+      {pending && (
+        <>
+          <div role="alert" style={errorText}>{t('share.pending')}</div>
+          <button type="button" style={secondaryBtn} disabled={adopting} onClick={() => void retryAdopt()}>{t('share.retry')}</button>
+        </>
+      )}
+      {email && owner && !pending && (
         <>
           <div style={{ height: 1, background: 'rgba(255,255,255,0.12)' }} />
           <div style={heading}>{t('share.title')}</div>

@@ -5,7 +5,7 @@ import { db } from '../db/db';
 vi.stubEnv('VITE_AUTH_URL', 'https://auth.test');
 vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'cid');
 
-import { getAccessToken, signOut, signIn, currentEmail, onAccountChange, AuthNeeded, Offline, ConsentRequired, EmailMismatch } from './auth';
+import { getAccessToken, signOut, signIn, currentEmail, onAccountChange, disconnectGoogle, AuthNeeded, Offline, AccountSwitch, ConsentRequired, EmailMismatch } from './auth';
 
 const fetchMock = vi.fn();
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
@@ -177,20 +177,44 @@ describe('sign-in hardening', () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it('a different account clears ledgerRef and lastSync and notifies (even after the old session expired)', async () => {
+  it('a different account than the recorded one throws AccountSwitch: new session revoked, nothing changed', async () => {
     await db.meta.bulkPut([
       { key: 'account', value: { email: 'a@b.com' } },
       { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }, { key: 'lastSync', value: { at: 1, version: '1' } },
     ]);
-    const changed = vi.fn();
-    const off = onAccountChange(changed);
-    fetchMock.mockResolvedValueOnce(ok('S2', 'c@d.com'));
+    fetchMock.mockResolvedValueOnce(ok('S2', 'c@d.com')).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const err = await signIn().catch((e) => e);
+    expect(err).toBeInstanceOf(AccountSwitch);
+    expect(err.email).toBe('c@d.com');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://auth.test/revoke');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ session: 'S2' });
+    expect(await db.meta.get('auth')).toBeUndefined();
+    expect((await db.meta.get('account'))?.value).toEqual({ email: 'a@b.com' });
+    expect(await db.meta.get('ledgerRef')).toBeDefined();
+    expect(await db.meta.get('lastSync')).toBeDefined();
+  });
+
+  it('signing in with no ledgerRef sets adoptPending together with auth; with a ref it does not', async () => {
+    fetchMock.mockResolvedValueOnce(ok('S1', 'a@b.com'));
     await signIn();
-    off();
-    expect(await db.meta.get('ledgerRef')).toBeUndefined();
-    expect(await db.meta.get('lastSync')).toBeUndefined();
-    expect(changed).toHaveBeenCalledTimes(1);
-    expect(await currentEmail()).toBe('c@d.com');
+    expect((await db.meta.get('adoptPending'))?.value).toBe(true);
+    await db.meta.delete('adoptPending');
+    await db.meta.put({ key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } });
+    fetchMock.mockResolvedValueOnce(ok('S2', 'a@b.com')).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await signIn();
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+  });
+
+  it('adoptPending is written in the same transaction as auth (a failed write leaves neither)', async () => {
+    fetchMock.mockResolvedValueOnce(ok('S1', 'a@b.com'));
+    const orig = db.meta.put.bind(db.meta);
+    const spy = vi.spyOn(db.meta, 'put').mockImplementation(((row: any) => {
+      if (row.key === 'adoptPending') return Promise.reject(new Error('disk full'));
+      return orig(row);
+    }) as any);
+    await expect(signIn()).rejects.toThrow('disk full');
+    spy.mockRestore();
+    expect(await db.meta.get('auth')).toBeUndefined();
   });
 
   it('expectEmail mismatch revokes the new session, keeps the old one and throws EmailMismatch', async () => {
@@ -213,10 +237,33 @@ describe('sign-in hardening', () => {
     const changed = vi.fn();
     const off = onAccountChange(changed);
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await db.meta.bulkPut([{ key: 'account', value: { email: 'a@b.com' } }, { key: 'adoptPending', value: true }]);
     await signOut();
     off();
     expect(await db.meta.get('ledgerRef')).toBeUndefined();
     expect(await db.meta.get('lastSync')).toBeUndefined();
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+    expect((await db.meta.get('account'))?.value).toEqual({ email: 'a@b.com' }); // the books are still that account's
     expect(changed).toHaveBeenCalledTimes(1);
+  });
+
+  it('signOut notifies (sync bumps its generation) before deleting the meta', async () => {
+    await db.meta.bulkPut([{ key: 'auth', value: { session: 'S', email: 'a@b.com' } }, { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }]);
+    let refAtNotify: unknown = 'unset';
+    const off = onAccountChange(() => { refAtNotify = 'called'; });
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const p = signOut();
+    expect(refAtNotify).toBe('called'); // synchronously, before any await
+    await p;
+    off();
+  });
+
+  it('disconnectGoogle posts /disconnect with the session and signs out here', async () => {
+    await db.meta.put({ key: 'auth', value: { session: 'S', email: 'a@b.com' } });
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await disconnectGoogle();
+    expect(fetchMock.mock.calls[0][0]).toBe('https://auth.test/disconnect');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ session: 'S' });
+    expect(await db.meta.get('auth')).toBeUndefined();
   });
 });
