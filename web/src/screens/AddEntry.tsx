@@ -159,17 +159,21 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
           ...(initial?.amountExcl !== undefined ? { amountExcl: initial.amountExcl } : {}),
           ...(initial?.tax !== undefined ? { tax: initial.tax } : {}),
         };
+        const orig = initial?.id ? await db.entries.get(initial.id) : undefined; // before overwrite
         const entry = kind === 'expense'
           ? await put<Entry>('entries', {
               ...base, categoryId: cat ?? '', ...(sid ? { supplierId: sid } : {}), status,
               ...(status === 'credit' && dueDate ? { dueDate } : {}),
             })
           : await put<Entry>('entries', { ...base, categoryId: channelCat?.id ?? '', channel: channelCat?.name ?? '' });
-        // Editing: a paid expense gets fresh payments, so retire the old live ones first
-        // (credit entries keep their payments untouched).
-        if (initial?.id && entry.kind === 'expense' && entry.status === 'paid') {
-          const old = await db.payments.where('entryId').equals(entry.id).toArray();
-          for (const p of old) if (!p.deleted) await softDelete('payments', p.id);
+        // Editing: the original status comes from the DB. Paid originals own an auto "paid now"
+        // payment; credit originals own real supplier payments, kept only while it stays a credit expense.
+        if (initial?.id) {
+          const retire = entry.kind === 'income' || entry.status === 'paid' || orig?.status === 'paid';
+          if (retire) {
+            const old = await db.payments.where('entryId').equals(entry.id).toArray();
+            for (const p of old) if (!p.deleted) await softDelete('payments', p.id);
+          }
         }
         for (const p of paymentsForPaidNow(entry)) await put('payments', p);
       });

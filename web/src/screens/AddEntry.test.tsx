@@ -171,3 +171,63 @@ test('editing a paid expense does not duplicate its payment; credit edits keep p
   expect(cp).toHaveLength(1);
   expect(cp[0].deleted).toBe(false);
 });
+
+const mkEntry = async (over: Partial<Entry>) => {
+  const metro = (await db.suppliers.toArray())[0];
+  return put<Entry>('entries', { kind: 'expense', date: '2026-11-10', amountIncl: 8000, categoryId: 'cat:expense:3', supplierId: metro.id, method: 'cash', status: 'paid', createdBy: '', ...over });
+};
+const live = async (id: string) => (await db.payments.where('entryId').equals(id).toArray()).filter((p) => !p.deleted);
+
+test('edit paid -> credit leaves 0 live payments and the bill is open', async () => {
+  const e = await mkEntry({});
+  await put<Payment>('payments', { entryId: e.id, date: e.date, amount: 8000, method: 'cash', createdBy: '' });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: 'On credit' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect(await live(e.id)).toHaveLength(0);
+  const { openBills } = await import('../domain/credit');
+  const bills = openBills(await db.entries.toArray(), await db.payments.toArray());
+  expect(bills.map((b) => [b.entry.id, b.remaining])).toEqual([[e.id, 8000]]);
+});
+
+test('edit credit with a partial payment staying credit keeps the payment', async () => {
+  const e = await mkEntry({ status: 'credit' });
+  await put<Payment>('payments', { entryId: e.id, date: e.date, amount: 3000, method: 'cash', createdBy: '' });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect((await db.entries.get(e.id))!.status).toBe('credit');
+  expect(await live(e.id)).toHaveLength(1);
+});
+
+test('edit expense -> income leaves 0 live payments', async () => {
+  const e = await mkEntry({});
+  await put<Payment>('payments', { entryId: e.id, date: e.date, amount: 8000, method: 'cash', createdBy: '' });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: 'Collection' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save collection' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect((await db.entries.get(e.id))!.kind).toBe('income');
+  expect(await live(e.id)).toHaveLength(0);
+});
+
+test('edit credit -> paid replaces its payments with one paid-now payment', async () => {
+  const e = await mkEntry({ status: 'credit' });
+  await put<Payment>('payments', { entryId: e.id, date: e.date, amount: 3000, method: 'cash', createdBy: '' });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: 'Paid' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  const l = await live(e.id);
+  expect(l).toHaveLength(1);
+  expect(l[0].amount).toBe(8000);
+});
