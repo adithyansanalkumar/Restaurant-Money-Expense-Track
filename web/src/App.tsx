@@ -5,6 +5,7 @@ import { useRoute, type Route } from './ui/router';
 import { Setup } from './screens/Setup';
 import { Home } from './screens/Home';
 import { History } from './screens/History';
+import { Reports } from './screens/Reports';
 import { getEditing, setEditing } from './ui/editing';
 import { AddEntry } from './screens/AddEntry';
 import { t, useLanguage } from './i18n';
@@ -34,10 +35,10 @@ export function App() {
     const editing = getEditing();
     return <div className="scene app-shell"><AddEntry key={editing?.id ?? 'new'} onGo={go} initial={editing ?? undefined} /></div>;
   }
-  if (route === 'home' || route === 'history') {
+  if (route === 'home' || route === 'history' || route === 'reports') {
     return (
       <div className="scene app-shell">
-        {route === 'home' ? <Home onGo={go} /> : <History onGo={go} />}
+        {route === 'home' ? <Home onGo={go} /> : route === 'history' ? <History onGo={go} /> : <Reports />}
         <TabBar current={route} onGo={go} />
       </div>
     );
