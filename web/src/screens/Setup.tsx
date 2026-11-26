@@ -40,6 +40,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
     if (d) { setCurrency(d.currency); setBillLanguage(d.billLanguage); }
   };
 
+  const [nameMissing, setNameMissing] = useState(false);
   const cont = async () => {
     if (busy) return;
     setBusy(true);
@@ -54,6 +55,8 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
         if (r === 'needsJoin') { onGo('join'); return; }
         if (r !== 'none') { setDriveError(true); return; }
       }
+      // a restaurant needs a name (Home's title); checked after the lookup, which may adopt one
+      if (!name.trim()) { setNameMissing(true); return; }
       // Shared settings go last: once that row exists, App stops routing to setup.
       await seedDefaults();
       await saveDevice({ appLanguage: device.appLanguage });
@@ -98,7 +101,8 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       <Glass style={{ alignSelf: 'stretch', borderRadius: 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={col}>
           <label htmlFor="s-name" style={label}>{t('setup.name')}</label>
-          <input id="s-name" className="field" value={name} onChange={(e) => setName(e.target.value)}
+          <input id="s-name" className="field" value={name} onChange={(e) => { setName(e.target.value); setNameMissing(false); }}
+            aria-invalid={nameMissing || undefined}
             style={{ height: 46, borderRadius: 14, padding: '0 14px', font: '600 15px Inter, sans-serif', color: '#FFFFFF' }} />
         </div>
         <div style={grid}>
@@ -137,6 +141,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       </Glass>
 
       {error && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E' }}>{t('setup.error')}</div>}
+      {nameMissing && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E', textAlign: 'center' }}>{t('setup.nameMissing')}</div>}
       {driveError && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E', textAlign: 'center' }}>{t('welcome.driveError')}</div>}
       <button type="button" onClick={() => void cont()} disabled={busy} style={{
         alignSelf: 'stretch', marginTop: 'auto', height: 58, borderRadius: 29, border: 0,

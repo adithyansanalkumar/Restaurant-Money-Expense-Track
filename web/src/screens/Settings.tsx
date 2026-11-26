@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { db } from '../db/db';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Glass } from '../ui/Glass';
 import { Segmented } from '../ui/Segmented';
 import { SyncStatus } from '../ui/SyncStatus';
@@ -23,12 +22,33 @@ import { getGeminiKey, setGeminiKey } from '../ocr/gemini';
 /** Google AI key field: saved on this phone only (device meta), never in shared settings. */
 function GeminiKeyInput() {
   const [v, setV] = useState('');
-  useEffect(() => { void getGeminiKey().then((k) => setV(k ?? '')).catch(() => {}); }, []);
+  // Saved shortly after each change and when the screen goes away: iOS often unmounts the screen
+  // (tab tap) without blurring the field first, so blur alone could lose a pasted key.
+  const pending = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (pending.current === null) return;
+    const key = pending.current;
+    pending.current = null;
+    void setGeminiKey(key).catch(() => {});
+  }, []);
+  useEffect(() => {
+    let live = true;
+    void getGeminiKey().then((k) => { if (live && pending.current === null) setV(k ?? ''); }).catch(() => {});
+    return () => { live = false; flush(); };
+  }, [flush]);
+  const change = (key: string) => {
+    setV(key);
+    pending.current = key;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 400);
+  };
   return (
     <div style={col}>
       <label style={label} htmlFor="gemini-key">{t('settings.geminiKey')}</label>
       <input id="gemini-key" type="password" autoComplete="off" autoCapitalize="off" spellCheck={false} value={v}
-        onChange={(e) => setV(e.target.value)} onBlur={() => void setGeminiKey(v)}
+        onChange={(e) => change(e.target.value)} onBlur={flush}
         style={{ ...select, width: '100%', boxSizing: 'border-box' }} />
       <div style={hint}>{t('settings.geminiKeyHelp')}</div>
     </div>
@@ -89,14 +109,13 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
   const [email, setEmail] = useState<string | null>(null);
   const [owner, setOwner] = useState(false);
   const [pending, setPending] = useState(false);
-  const [hasRef, setHasRef] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [adopting, setAdopting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [e, o, p, r] = await Promise.all([currentEmail(), isOwner(), isAdoptPending(), db.meta.get('ledgerRef')]);
-      setEmail(e); setOwner(o); setPending(p); setHasRef(!!r);
+      const [e, o, p] = await Promise.all([currentEmail(), isOwner(), isAdoptPending()]);
+      setEmail(e); setOwner(o); setPending(p);
     } catch { /* keep what is shown */ }
   }, []);
   useEffect(() => { void refresh(); }, [refresh, shared, status, revision]);
@@ -180,8 +199,8 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
   };
   const removePin = async () => { await clearPin(); setPinMode('idle'); setBio(false); await loadLock(); };
 
-  // owner, or a purely local restaurant (signed out, no ledger yet)
-  const canEditRegion = owner || (!email && !hasRef);
+  // Spec §10: both people have equal rights over shared settings; only sharing is owner-only.
+  // Nothing shared is written while adoptPending (save() refuses, the fields are disabled).
   const roleText = !email ? t('settings.localOnly') : owner ? t('settings.owner') : t('settings.sharedRole');
   const sharedWith = shared?.sharedWith ?? [];
 
@@ -190,9 +209,7 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
       <h1 style={{ margin: 0, fontFamily: "'Inter Tight', sans-serif", fontSize: 28, fontWeight: 800, color: '#FFFFFF' }}>{t('settings.title')}</h1>
 
       <Card title={t('settings.restaurant')}>
-        {shared && canEditRegion
-          ? <NameInput value={shared.restaurantName} disabled={pending} onSave={(n) => void save({ restaurantName: n })} />
-          : <div style={{ fontSize: 20, fontWeight: 800 }}>{shared?.restaurantName}</div>}
+        {shared && <NameInput value={shared.restaurantName} disabled={pending} onSave={(n) => void save({ restaurantName: n })} />}
         <div style={{ ...hint, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           {email && <span>{email}</span>}
           <span style={{ padding: '2px 10px', borderRadius: 12, background: 'rgba(255,255,255,0.14)', fontWeight: 700, color: '#FFFFFF' }}>{roleText}</span>
@@ -211,27 +228,21 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
 
       {shared && (
         <Card title={t('settings.region')}>
-          {canEditRegion ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-              <div style={col}>
-                <label htmlFor="st-country" style={label}>{t('setup.country')}</label>
-                <select id="st-country" className="field" style={select} value={shared.country} disabled={pending}
-                  onChange={(e) => { const c = e.target.value; void save({ country: c, ...(COUNTRY_DEFAULTS[c] ? { currency: COUNTRY_DEFAULTS[c].currency } : {}) }); }}>
-                  {Object.keys(COUNTRY_DEFAULTS).map((c) => <option key={c} value={c}>{t(`country.${c}` as 'country.FR')}</option>)}
-                </select>
-              </div>
-              <div style={col}>
-                <label htmlFor="st-cur" style={label}>{t('setup.currency')}</label>
-                <select id="st-cur" className="field" style={select} value={shared.currency} disabled={pending} onChange={(e) => void save({ currency: e.target.value })}>
-                  {CURRENCIES.map((c) => <option key={c} value={c}>{t(`currency.${c}` as 'currency.EUR')}</option>)}
-                </select>
-              </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+            <div style={col}>
+              <label htmlFor="st-country" style={label}>{t('setup.country')}</label>
+              <select id="st-country" className="field" style={select} value={shared.country} disabled={pending}
+                onChange={(e) => { const c = e.target.value; void save({ country: c, ...(COUNTRY_DEFAULTS[c] ? { currency: COUNTRY_DEFAULTS[c].currency } : {}) }); }}>
+                {Object.keys(COUNTRY_DEFAULTS).map((c) => <option key={c} value={c}>{t(`country.${c}` as 'country.FR')}</option>)}
+              </select>
             </div>
-          ) : (
-            <div style={hint}>
-              {t(`country.${shared.country}` as 'country.FR')} · {t(`currency.${shared.currency}` as 'currency.EUR')}. {t('settings.regionReadOnly')}
+            <div style={col}>
+              <label htmlFor="st-cur" style={label}>{t('setup.currency')}</label>
+              <select id="st-cur" className="field" style={select} value={shared.currency} disabled={pending} onChange={(e) => void save({ currency: e.target.value })}>
+                {CURRENCIES.map((c) => <option key={c} value={c}>{t(`currency.${c}` as 'currency.EUR')}</option>)}
+              </select>
             </div>
-          )}
+          </div>
         </Card>
       )}
 

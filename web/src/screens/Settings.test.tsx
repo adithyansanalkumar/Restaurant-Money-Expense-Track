@@ -75,12 +75,16 @@ test('country change sets its currency; the owner can edit it', async () => {
   await waitFor(async () => expect((await shared()).currency).toBe('USD'));
 });
 
-test('a non-owner cannot edit country and currency', async () => {
+test('a joined user (not the owner) may change country and currency too; only sharing is owner-only (M10)', async () => {
   auth.email = 'son@x.com';
   render(<Settings onGo={vi.fn()} />);
-  await screen.findByText('Chez Adi');
   await waitFor(() => expect(screen.getByText('Shared')).toBeTruthy());
-  expect(screen.queryByLabelText('Country')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'GB' } });
+  await waitFor(async () => expect(await shared()).toMatchObject({ country: 'GB', currency: 'GBP' }));
+  fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'EUR' } });
+  await waitFor(async () => expect((await shared()).currency).toBe('EUR'));
+  fireEvent.click(screen.getByRole('button', { name: 'Excl. tax' }));
+  await waitFor(async () => expect((await shared()).taxView).toBe('excl'));
   expect(screen.queryByText('Share with someone')).toBeNull();
 });
 
@@ -170,6 +174,7 @@ test('photo backup toggle is a shared setting; turning it on runs the backup', a
   render(<Settings onGo={vi.fn()} />);
   const sw = await screen.findByRole('switch', { name: /Back up bill photos/ });
   expect(sw.getAttribute('aria-checked')).toBe('false');
+  await waitFor(() => expect(sw).not.toBeDisabled()); // enabled once the signed-in email is known (M11)
   fireEvent.click(sw);
   await waitFor(async () => expect((await shared()).photoBackup).toBe(true));
   await waitFor(() => expect(backup.backupPendingPhotos).toHaveBeenCalledTimes(1));
@@ -264,7 +269,7 @@ test('signed out former joiner: sign-in that ends in needsJoin sends the user to
   await waitFor(() => expect(go).toHaveBeenCalledWith('join'));
 });
 
-test('owner can rename the restaurant (shared setting); a non-owner sees it read-only', async () => {
+test('owner and joined user can both rename the restaurant (shared setting, M10)', async () => {
   const { unmount } = render(<Settings onGo={vi.fn()} />);
   const input = await screen.findByLabelText('Restaurant name');
   fireEvent.change(input, { target: { value: 'Chez Dad' } });
@@ -273,8 +278,20 @@ test('owner can rename the restaurant (shared setting); a non-owner sees it read
   unmount();
   auth.email = 'son@x.com';
   render(<Settings onGo={vi.fn()} />);
-  await screen.findByText('Chez Dad');
-  expect(screen.queryByLabelText('Restaurant name')).toBeNull();
+  const again = await screen.findByLabelText('Restaurant name');
+  fireEvent.change(again, { target: { value: 'Chez Papa' } });
+  fireEvent.blur(again);
+  await waitFor(async () => expect((await shared()).restaurantName).toBe('Chez Papa'));
+});
+
+test('an empty restaurant name is not saved; the old one comes back', async () => {
+  render(<Settings onGo={vi.fn()} />);
+  const input = await screen.findByLabelText('Restaurant name');
+  const before = await shared();
+  fireEvent.change(input, { target: { value: '   ' } });
+  fireEvent.blur(input);
+  await waitFor(() => expect(input).toHaveValue('Chez Adi'));
+  expect(await shared()).toEqual(before);
 });
 
 test('name is not editable while adoptPending', async () => {
@@ -291,12 +308,23 @@ test('a purely local phone (signed out, no ledgerRef) can edit name and region e
   expect(screen.getByLabelText('Country')).toBeTruthy();
 });
 
-test('signed out but with a ledgerRef and another owner: read-only', async () => {
-  auth.email = null; // ownerEmail adi@x.com is set, a ledger exists: not purely local
+test('signed out with a ledgerRef: shared settings stay editable (equal rights, synced later)', async () => {
+  auth.email = null;
   render(<Settings onGo={vi.fn()} />);
-  await screen.findByText('Chez Adi');
-  expect(screen.queryByLabelText('Restaurant name')).toBeNull();
-  expect(screen.queryByLabelText('Country')).toBeNull();
+  expect(await screen.findByLabelText('Restaurant name')).toBeTruthy();
+  expect(screen.getByLabelText('Country')).toBeTruthy();
+});
+
+test('while adoptPending the region and tax view are not written (M10)', async () => {
+  auth.email = 'son@x.com';
+  await db.meta.put({ key: 'adoptPending', value: true });
+  const before = await shared();
+  render(<Settings onGo={vi.fn()} />);
+  const country = await screen.findByLabelText('Country');
+  expect(country).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Excl. tax' }));
+  await new Promise((r) => setTimeout(r, 30));
+  expect(await shared()).toEqual(before);
 });
 
 test('bill reading: Google AI choice writes ocrMode, reveals the key field; key stays on the device', async () => {
@@ -309,7 +337,7 @@ test('bill reading: Google AI choice writes ocrMode, reveals the key field; key 
   expect(key).toHaveAttribute('type', 'password');
   expect(screen.getByText(/sent to Google/)).toBeTruthy();
   fireEvent.change(key, { target: { value: 'AIza123' } });
-  fireEvent.blur(key);
+  // saved without a blur (iOS may not blur before a tab switch unmounts the screen)
   await waitFor(async () => expect((await db.meta.get('geminiKey'))?.value).toBe('AIza123'));
   expect(JSON.stringify(await shared())).not.toContain('AIza123');
   fireEvent.click(screen.getByRole('radio', { name: 'On this phone' }));
@@ -323,4 +351,14 @@ test('bill reading mode is not written while adoptPending', async () => {
   fireEvent.click(await screen.findByRole('radio', { name: /Google AI/ }));
   await new Promise((r) => setTimeout(r, 30));
   expect(await shared()).toEqual(before);
+});
+
+test('the Google AI key is saved when the screen goes away right after typing (M2)', async () => {
+  await saveShared({ ocrMode: 'gemini' });
+  const { unmount } = render(<Settings onGo={vi.fn()} />);
+  const key = await screen.findByLabelText('Google AI key');
+  await waitFor(async () => expect(await db.meta.get('geminiKey')).toBeUndefined());
+  fireEvent.change(key, { target: { value: 'AIzaUNMOUNT' } });
+  unmount();
+  await waitFor(async () => expect((await db.meta.get('geminiKey'))?.value).toBe('AIzaUNMOUNT'));
 });

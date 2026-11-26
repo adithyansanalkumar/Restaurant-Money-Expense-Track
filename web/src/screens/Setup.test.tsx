@@ -42,6 +42,7 @@ test('failed seeding leaves no shared settings, shows an error and re-enables Co
   vi.spyOn(repo, 'seedDefaults').mockRejectedValueOnce(new Error('boom'));
   const go = vi.fn();
   render(<Setup onGo={go} />);
+  fireEvent.change(screen.getByLabelText('Restaurant name'), { target: { value: 'Chez Adi' } });
   fireEvent.click(screen.getByText('Continue'));
   await screen.findByRole('alert');
   expect(go).not.toHaveBeenCalled();
@@ -75,8 +76,19 @@ describe('signed in with this account\'s Drive not checked yet (adoptPending)', 
     adopt.mockResolvedValue('none');
     const go = vi.fn();
     render(<Setup onGo={go} />);
+    fireEvent.change(screen.getByLabelText('Restaurant name'), { target: { value: 'Chez Adi' } });
     fireEvent.click(screen.getByText('Continue'));
     await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
     expect((await db.settings.get('shared'))?.ownerEmail).toBe('adi@x.com');
   });
+});
+
+test('an empty (or blank) restaurant name is not accepted', async () => {
+  const go = vi.fn();
+  render(<Setup onGo={go} />);
+  fireEvent.change(screen.getByLabelText('Restaurant name'), { target: { value: '   ' } });
+  fireEvent.click(screen.getByText('Continue'));
+  expect(await screen.findByText('Please enter the restaurant name')).toBeTruthy();
+  expect(go).not.toHaveBeenCalled();
+  expect(await db.settings.get('shared')).toBeUndefined();
 });
