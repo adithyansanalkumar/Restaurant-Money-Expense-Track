@@ -114,3 +114,11 @@ test('a category named "Other" next to the remainder slice gives no duplicate Re
     expect(err.mock.calls.some((c) => String(c[0]).includes('same key'))).toBe(false);
   } finally { err.mockRestore(); }
 });
+
+test('excl view with most amounts lacking HT shows the banner (I4)', async () => {
+  await saveShared({ taxView: 'excl' });
+  await db.entries.clear();
+  await put<Entry>('entries', { id: 'a', kind: 'income', date: '2026-11-10', amountIncl: 1000, categoryId: 'c', method: 'card', createdBy: '' } as any);
+  render(<Reports />);
+  expect(await screen.findByText('Most amounts here include tax — add HT amounts under More to see a true HT profit')).toBeTruthy();
+});

@@ -79,10 +79,13 @@ export function allocatePayment(
   return out;
 }
 
+/** The id of an entry's automatic "paid now" payment: the same on every phone, so edits merge (LWW). */
+export const paidNowId = (entryId: Id): Id => `paid:${entryId}`;
+
 export function paymentsForPaidNow(entry: Entry): Payment[] {
   if (entry.kind !== 'expense' || entry.status !== 'paid') return [];
   return [{
-    id: crypto.randomUUID(), updatedAt: 0, deviceId: '', deleted: false,
+    id: paidNowId(entry.id), updatedAt: 0, deviceId: '', deleted: false,
     entryId: entry.id, date: entry.date, amount: entry.amountIncl, method: entry.method, createdBy: entry.createdBy,
   }];
 }

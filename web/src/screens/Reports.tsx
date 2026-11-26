@@ -4,7 +4,7 @@ import { ProfitBars } from '../ui/charts/ProfitBars';
 import { Donut } from '../ui/charts/Donut';
 import { useMoney } from '../ui/useMoney';
 import { todayISO } from '../domain/clock';
-import { byCategory, bySupplier, cashOut, series, summarize } from '../domain/totals';
+import { byCategory, bySupplier, cashOut, mostlyFallback, series, summarize } from '../domain/totals';
 import type { Category, Entry, ISODate, Payment, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
 import { t, useLanguage } from '../i18n';
@@ -141,7 +141,9 @@ export function Reports() {
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#B3C8D9' }}>
           {data.map((d) => <span key={d.label}>{monthFmt(d.label + '-01', { month: 'short' })}</span>)}
         </div>
-        {sum.fallbackCount > 0 && (
+        {mostlyFallback(sum, view) ? (
+          <div role="note" style={{ fontSize: 13, fontWeight: 600, color: '#FFE3A3', background: 'rgba(255,200,90,0.14)', border: '1px solid rgba(255,200,90,0.4)', borderRadius: 14, padding: '8px 12px' }}>{t('tax.mostlyIncl')}</div>
+        ) : sum.fallbackCount > 0 && (
           <div style={{ fontSize: 12, color: '#C6D8E6' }}>
             {sum.fallbackCount === 1 ? t('home.fallbackNoteOne') : t('home.fallbackNote', { n: sum.fallbackCount })}
           </div>

@@ -6,7 +6,7 @@ import type { Route } from '../ui/router';
 import { pressKey, type KeypadKey } from '../domain/keypad';
 import { parseAmount } from '../domain/money';
 import { todayISO } from '../domain/clock';
-import { paymentsForPaidNow } from '../domain/credit';
+import { paidNowId, paymentsForPaidNow } from '../domain/credit';
 import type { Category, Entry, Id, Supplier } from '../domain/types';
 import { db } from '../db/db';
 import { getDeviceId } from '../db/device';
@@ -51,6 +51,20 @@ const chip = (on: boolean): CSSProperties => ({
   font: `${on ? 600 : 500} 13px Inter, sans-serif`, color: on ? '#FFFFFF' : '#DCE8F1',
   display: 'flex', alignItems: 'center', gap: 8,
 });
+/**
+ * The optional HT fields ("More"). Given two of incl / excl / tax, the third is computed; with
+ * all three, they are kept as typed. Null = nothing usable typed. 'over' = excl or tax above the total.
+ */
+export function resolveTax(incl: number, excl: number | null, tax: number | null): { incl: number; excl: number; tax: number } | null | 'over' {
+  const hasIncl = incl > 0;
+  if (excl !== null && tax !== null && !hasIncl) return { incl: excl + tax, excl, tax };
+  if (!hasIncl) return null;
+  if (excl !== null && tax !== null) return excl > incl || tax > incl ? 'over' : { incl, excl, tax };
+  if (excl !== null) return excl > incl ? 'over' : { incl, excl, tax: incl - excl };
+  if (tax !== null) return tax > incl ? 'over' : { incl, excl: incl - tax, tax };
+  return null;
+}
+
 const dateInput: CSSProperties = { height: 44, borderRadius: 12, padding: '0 10px', font: '600 14px Inter, sans-serif', color: '#FFFFFF' };
 
 export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?: Partial<Entry> & { photoId?: Id } }) {
@@ -74,6 +88,12 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
   const [dueDate, setDueDate] = useState(initial?.dueDate ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
   const [sheet, setSheet] = useState(false);
+  // "More": optional amount excl. tax and tax, collapsed by default (the quick path stays the same)
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [exclText, setExclText] = useState(() => (initial?.amountExcl !== undefined ? formatTyped(initial.amountExcl, sep) : ''));
+  const [taxText, setTaxText] = useState(() => (initial?.tax !== undefined ? formatTyped(initial.tax, sep) : ''));
+  const [htTouched, setHtTouched] = useState(false);
+  const [overError, setOverError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
 
@@ -96,7 +116,11 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
   }, []);
 
   const typed = display.endsWith(sep) ? display.slice(0, -1) : display;
-  const cents = parseAmount(typed) ?? 0;
+  const typedCents = parseAmount(typed) ?? 0;
+  const parseOpt = (v: string) => (v.trim() === '' ? null : parseAmount(v));
+  const ht = htTouched ? resolveTax(typedCents, parseOpt(exclText), parseOpt(taxText)) : null;
+  // excl + tax typed with no total on the keypad: the total is their sum
+  const cents = ht && ht !== 'over' ? ht.incl : typedCents;
   const color = kind === 'expense' ? OUT : IN;
 
   const recentSuppliers = useMemo(() => {
@@ -132,8 +156,11 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
 
   const save = async () => {
     if (busy || cents <= 0) return;
+    if (ht === 'over') { setOverError(true); setMoreOpen(true); return; }
     setBusy(true);
     setError(false);
+    setOverError(false);
+    const day = date || todayISO(); // a cleared date input: today, never an empty date
     try {
       await getDeviceId();
       const createdBy = (await currentEmail()) ?? ''; // read before the transaction
@@ -153,13 +180,19 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
         }
         const channelCat = incomeCats.find((c) => c.id === channelSel);
         const noteText = note.trim();
+        // HT values: the "More" fields when used, else the bill's own (kept while the total is unchanged)
+        const htPart = htTouched
+          ? (ht ? { amountExcl: ht.excl, tax: ht.tax } : {})
+          : {
+              ...(initial?.amountExcl !== undefined && cents === initial.amountIncl ? { amountExcl: initial.amountExcl } : {}),
+              ...(initial?.tax !== undefined && cents === initial.amountIncl ? { tax: initial.tax } : {}),
+            };
         const base = {
-          kind, date, amountIncl: cents, method, createdBy: initial?.createdBy ?? createdBy,
+          kind, date: day, amountIncl: cents, method, createdBy: initial?.createdBy ?? createdBy,
           ...(initial?.id ? { id: initial.id } : {}),
           ...(noteText ? { note: noteText } : {}),
           ...(initial?.photoId ? { photoId: initial.photoId } : {}),
-          ...(initial?.amountExcl !== undefined && cents === initial.amountIncl ? { amountExcl: initial.amountExcl } : {}),
-          ...(initial?.tax !== undefined && cents === initial.amountIncl ? { tax: initial.tax } : {}),
+          ...htPart,
         };
         const orig = initial?.id ? await db.entries.get(initial.id) : undefined; // before overwrite
         const entry = kind === 'expense'
@@ -170,14 +203,18 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
           : await put<Entry>('entries', { ...base, categoryId: channelCat?.id ?? '', channel: channelCat?.name ?? '' });
         // Editing: the original status comes from the DB. Paid originals own an auto "paid now"
         // payment; credit originals own real supplier payments, kept only while it stays a credit expense.
+        // The "paid now" payment has a fixed id (paid:<entryId>): it is rewritten in place, so two
+        // phones editing the same entry while apart merge into one payment (LWW), never two.
+        const paidNow = paymentsForPaidNow(entry);
         if (initial?.id) {
           const retire = entry.kind === 'income' || entry.status === 'paid' || orig?.status === 'paid';
           if (retire) {
             const old = await db.payments.where('entryId').equals(entry.id).toArray();
-            for (const p of old) if (!p.deleted) await softDelete('payments', p.id);
+            const keep = paidNow.length ? paidNowId(entry.id) : null;
+            for (const p of old) if (!p.deleted && p.id !== keep) await softDelete('payments', p.id);
           }
         }
-        for (const p of paymentsForPaidNow(entry)) await put('payments', p);
+        for (const p of paidNow) await put('payments', p);
       });
       onGo('home');
     } catch {
@@ -297,6 +334,23 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
         )}
         <input className="field" aria-label={t('add.note')} placeholder={t('add.note')} value={note}
           onChange={(e) => setNote(e.target.value)} style={{ ...dateInput, width: '100%', fontWeight: 500 }} />
+        <button type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}
+          style={{ minHeight: 44, alignSelf: 'flex-start', padding: '0 4px', border: 0, background: 'transparent', color: '#8FD8F2', font: '600 14px Inter, sans-serif' }}>
+          {t('add.moreTax')} <span aria-hidden="true">{moreOpen ? '▴' : '▾'}</span>
+        </button>
+        {moreOpen && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: '#C6D8E6' }}>{t('add.amountExcl')}
+              <input className="field" inputMode="decimal" autoComplete="off" value={exclText}
+                onChange={(e) => { setExclText(e.target.value); setHtTouched(true); setOverError(false); }} style={{ ...dateInput, width: '100%', boxSizing: 'border-box' }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: '#C6D8E6' }}>{t('add.tax')}
+              <input className="field" inputMode="decimal" autoComplete="off" value={taxText}
+                onChange={(e) => { setTaxText(e.target.value); setHtTouched(true); setOverError(false); }} style={{ ...dateInput, width: '100%', boxSizing: 'border-box' }} />
+            </label>
+          </div>
+        )}
+        {overError && <div role="alert" style={{ color: OUT, fontSize: 13 }}>{t('add.taxOver')}</div>}
       </Glass>
 
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>

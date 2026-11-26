@@ -51,7 +51,8 @@ export function RecordPayment({ supplier, entries, payments, onDone, onCancel }:
     if (busy || cents <= 0) return;
     setBusy(true); setFailed(false);
     try {
-      const res = allocatePayment(supplier.id, cents, date, method, entries, payments, (await currentEmail()) ?? '');
+      // a cleared date input: today, never an empty date
+      const res = allocatePayment(supplier.id, cents, date || todayISO(), method, entries, payments, (await currentEmail()) ?? '');
       if (!Array.isArray(res)) {
         if (res.error === 'tooMuch') setTooMuch(res.owed);
         return;

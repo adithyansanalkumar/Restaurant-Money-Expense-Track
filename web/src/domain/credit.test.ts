@@ -86,6 +86,7 @@ describe('paymentsForPaidNow', () => {
     const e = { ...creditEntries[0], status: 'paid' as const, method: 'card' as const };
     const r = paymentsForPaidNow(e);
     expect(r).toHaveLength(1);
+    expect(r[0].id).toBe(`paid:${e.id}`); // deterministic: concurrent edits of one entry merge (LWW)
     expect(r[0]).toMatchObject({ entryId: e.id, date: e.date, amount: e.amountIncl, method: 'card', createdBy: 'u1', deleted: false });
   });
   it('none otherwise', () => {

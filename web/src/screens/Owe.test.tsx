@@ -77,3 +77,13 @@ test('a recorded payment is stamped with the signed-in email', async () => {
   await waitFor(async () => expect(await db.payments.count()).toBe(2));
   expect((await db.payments.toArray()).every((p) => p.createdBy === 'dad@x.com')).toBe(true);
 });
+
+test('a cleared payment date is recorded as today, never empty (M1)', async () => {
+  render(<Owe onGo={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Record a payment' }));
+  fireEvent.change(screen.getByLabelText('Payment date'), { target: { value: '' } });
+  tap('1', '0');
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm payment' }));
+  await waitFor(async () => expect(await db.payments.count()).toBeGreaterThan(0));
+  expect((await db.payments.toArray()).every((p) => p.date === '2026-11-25')).toBe(true);
+});

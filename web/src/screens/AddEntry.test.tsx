@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { db } from '../db/db';
 import { setLanguage } from '../i18n';
@@ -262,4 +262,112 @@ test('a new entry (and its paid-now payment) is stamped with the signed-in email
   await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
   expect((await db.entries.toArray())[0].createdBy).toBe('dad@x.com');
   expect((await db.payments.toArray())[0].createdBy).toBe('dad@x.com');
+});
+
+test('paid now: the auto payment has the id paid:<entryId>; an edit rewrites that same row (M3)', async () => {
+  const go = vi.fn();
+  render(<AddEntry onGo={go} />);
+  fireEvent.click(await screen.findByText('Metro'));
+  tap('2', '0');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  const e = (await db.entries.toArray())[0];
+  expect((await db.payments.toArray()).map((p) => p.id)).toEqual([`paid:${e.id}`]);
+  const go2 = vi.fn();
+  render(<AddEntry onGo={go2} initial={e} />);
+  fireEvent.click((await screen.findAllByRole('button', { name: '0' })).at(-1)!);
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Save expense' })).at(-1)!);
+  await waitFor(() => expect(go2).toHaveBeenCalledWith('home'));
+  const pays = await db.payments.toArray();
+  expect(pays).toHaveLength(1); // the same row, not a tombstone + a new random one
+  expect(pays[0]).toMatchObject({ id: `paid:${e.id}`, deleted: false, amount: 20000 });
+});
+
+test('paid -> credit soft-deletes the paid:<entryId> payment (M3)', async () => {
+  const e = await mkEntry({});
+  await put<Payment>('payments', { id: `paid:${e.id}`, entryId: e.id, date: e.date, amount: 8000, method: 'cash', createdBy: '' });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} initial={e} />);
+  await screen.findByText('Metro');
+  fireEvent.click(screen.getByRole('button', { name: 'On credit' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect(await db.payments.get(`paid:${e.id}`)).toMatchObject({ deleted: true });
+});
+
+test('a cleared date is saved as today, never empty (M1)', async () => {
+  const { todayISO } = await import('../domain/clock');
+  const go = vi.fn();
+  render(<AddEntry onGo={go} />);
+  fireEvent.click(await screen.findByText('Metro'));
+  fireEvent.change(screen.getByLabelText('Bill date'), { target: { value: '' } });
+  tap('9');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect((await db.entries.toArray())[0].date).toBe(todayISO());
+  expect((await db.payments.toArray())[0].date).toBe(todayISO());
+});
+
+describe('More: amount excl. tax and tax (I4)', () => {
+  const more = () => fireEvent.click(screen.getByRole('button', { name: 'More' }));
+  test('collapsed by default: the quick path is unchanged', async () => {
+    render(<AddEntry onGo={vi.fn()} />);
+    await screen.findByText('Metro');
+    expect(screen.queryByLabelText('Amount excl. tax')).toBeNull();
+    expect(screen.getByRole('button', { name: 'More' })).toHaveAttribute('aria-expanded', 'false');
+  });
+  test('expense: total + excl gives the tax', async () => {
+    const go = vi.fn();
+    render(<AddEntry onGo={go} />);
+    fireEvent.click(await screen.findByText('Metro'));
+    tap('1', '2', '0');
+    more();
+    fireEvent.change(screen.getByLabelText('Amount excl. tax'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect((await db.entries.toArray())[0]).toMatchObject({ amountIncl: 12000, amountExcl: 10000, tax: 2000 });
+  });
+  test('collection: total + tax gives the excl amount', async () => {
+    const go = vi.fn();
+    render(<AddEntry onGo={go} />);
+    await screen.findByText('Metro');
+    fireEvent.click(screen.getByRole('button', { name: 'Collection' }));
+    tap('1', '1', '0');
+    more();
+    fireEvent.change(screen.getByLabelText('Tax'), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save collection' }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect((await db.entries.toArray())[0]).toMatchObject({ kind: 'income', amountIncl: 11000, amountExcl: 10000, tax: 1000 });
+  });
+  test('excl + tax with no total: the total is computed', async () => {
+    const go = vi.fn();
+    render(<AddEntry onGo={go} />);
+    fireEvent.click(await screen.findByText('Metro'));
+    more();
+    fireEvent.change(screen.getByLabelText('Amount excl. tax'), { target: { value: '50,5' } });
+    fireEvent.change(screen.getByLabelText('Tax'), { target: { value: '10,10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+    expect((await db.entries.toArray())[0]).toMatchObject({ amountIncl: 6060, amountExcl: 5050, tax: 1010 });
+  });
+  test('excl above the total is refused with a message', async () => {
+    const go = vi.fn();
+    render(<AddEntry onGo={go} />);
+    fireEvent.click(await screen.findByText('Metro'));
+    tap('5');
+    more();
+    fireEvent.change(screen.getByLabelText('Amount excl. tax'), { target: { value: '9' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+    expect(await screen.findByText('The amount excl. tax can’t be more than the total')).toBeTruthy();
+    expect(go).not.toHaveBeenCalled();
+    expect(await db.entries.count()).toBe(0);
+  });
+  test('editing shows the stored HT values', async () => {
+    const e = await mkEntry({ amountExcl: 7000, tax: 1000 });
+    render(<AddEntry onGo={vi.fn()} initial={e} />);
+    await screen.findByText('Metro');
+    more();
+    expect(screen.getByLabelText('Amount excl. tax')).toHaveValue('70');
+    expect(screen.getByLabelText('Tax')).toHaveValue('10');
+  });
 });

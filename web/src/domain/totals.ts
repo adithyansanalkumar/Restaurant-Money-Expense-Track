@@ -37,13 +37,19 @@ function nextBucket(start: ISODate, bucket: Bucket): ISODate {
 }
 
 export function summarize(entries: Entry[], from: ISODate, to: ISODate, view: View) {
-  let inn = 0, out = 0, fallbackCount = 0;
+  let inn = 0, out = 0, fallbackCount = 0, count = 0;
   for (const e of live(entries, from, to)) {
     const { cents, fallback } = shownAmount(e, view);
+    count++;
     if (fallback) fallbackCount++;
     if (e.kind === 'income') inn += cents; else out += cents;
   }
-  return { in: inn, out, profit: inn - out, fallbackCount };
+  return { in: inn, out, profit: inn - out, fallbackCount, count };
+}
+
+/** Excl-tax view where more than half of the amounts had no HT value (shown incl. tax instead). */
+export function mostlyFallback(sum: { fallbackCount: number; count: number }, view: View): boolean {
+  return view === 'excl' && sum.count > 0 && sum.fallbackCount * 2 > sum.count;
 }
 
 export function series(

@@ -5,7 +5,7 @@ import type { Route } from '../ui/router';
 import { useMoney } from '../ui/useMoney';
 import { todayISO } from '../domain/clock';
 import { periodRange, previousRange, type Period } from '../domain/period';
-import { compare, series, shownAmount, summarize } from '../domain/totals';
+import { compare, mostlyFallback, series, shownAmount, summarize } from '../domain/totals';
 import { dueBucket, openBills, supplierBalances } from '../domain/credit';
 import type { Category, Entry, Payment, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
@@ -121,7 +121,9 @@ export function Home({ onGo }: { onGo: (r: Route) => void }) {
             <span style={{ display: 'flex', gap: 6, color: '#DCE8F1' }}><span style={{ color: OUT, fontWeight: 700 }}>↑ {t('home.out')}</span><span>{fmt(sum.out)}</span></span>
           </div>
         </div>
-        {sum.fallbackCount > 0 && (
+        {mostlyFallback(sum, view) ? (
+          <div role="note" style={{ fontSize: 13, fontWeight: 600, color: '#FFE3A3', background: 'rgba(255,200,90,0.14)', border: '1px solid rgba(255,200,90,0.4)', borderRadius: 14, padding: '8px 12px' }}>{t('tax.mostlyIncl')}</div>
+        ) : sum.fallbackCount > 0 && (
           <div style={{ fontSize: 12, color: '#C6D8E6' }}>
             {sum.fallbackCount === 1 ? t('home.fallbackNoteOne') : t('home.fallbackNote', { n: sum.fallbackCount })}
           </div>

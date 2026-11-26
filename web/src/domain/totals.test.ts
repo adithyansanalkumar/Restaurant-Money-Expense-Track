@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { shownAmount, summarize, series, byCategory, bySupplier, cashOut, compare } from './totals';
+import { shownAmount, summarize, series, byCategory, bySupplier, cashOut, compare, mostlyFallback } from './totals';
 import { novemberEntries as E, novemberPayments as P } from './__fixtures__/november';
 
 describe('summarize', () => {
   test('November incl', () => {
-    expect(summarize(E, '2026-11-01', '2026-11-30', 'incl')).toEqual({ in: 980000, out: 746000, profit: 234000, fallbackCount: 0 });
+    expect(summarize(E, '2026-11-01', '2026-11-30', 'incl')).toEqual({ in: 980000, out: 746000, profit: 234000, fallbackCount: 0, count: 3 });
   });
   test('October profit; bounds inclusive', () => {
     expect(summarize(E, '2026-10-01', '2026-10-31', 'incl').profit).toBe(209000);
@@ -74,5 +74,14 @@ describe('byCategory / bySupplier', () => {
     expect(bySupplier(E, '2027-01-01', '2027-01-31', 'incl')).toEqual([]);
     const noSup = [{ ...E[2], supplierId: undefined }];
     expect(bySupplier(noSup, '2026-11-01', '2026-11-30', 'incl')).toEqual([]);
+  });
+});
+
+describe('mostlyFallback (I4 banner)', () => {
+  test('only in excl view, when more than half of the amounts fell back', () => {
+    expect(mostlyFallback({ fallbackCount: 2, count: 3 }, 'excl')).toBe(true);
+    expect(mostlyFallback({ fallbackCount: 1, count: 2 }, 'excl')).toBe(false); // exactly half
+    expect(mostlyFallback({ fallbackCount: 3, count: 3 }, 'incl')).toBe(false);
+    expect(mostlyFallback({ fallbackCount: 0, count: 0 }, 'excl')).toBe(false);
   });
 });

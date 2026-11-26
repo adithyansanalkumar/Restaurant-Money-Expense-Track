@@ -97,3 +97,15 @@ test('the sync button runs a sync; signed out it offers "Sign in to sync"', asyn
   fireEvent.click(await screen.findByRole('button', { name: 'Sync now' }));
   expect(await screen.findByRole('button', { name: 'Sign in to sync' })).toBeTruthy();
 });
+
+test('excl view with most amounts lacking HT: a clear banner instead of the small count (I4)', async () => {
+  await saveShared({ taxView: 'excl' });
+  await seed([
+    { id: 'a', updatedAt: 1, deviceId: 'd', deleted: false, createdBy: '', kind: 'income', date: '2026-11-10', amountIncl: 1000, categoryId: 'c', method: 'card' },
+    { id: 'b', updatedAt: 1, deviceId: 'd', deleted: false, createdBy: '', kind: 'income', date: '2026-11-11', amountIncl: 1000, categoryId: 'c', method: 'card' },
+    { id: 'c', updatedAt: 1, deviceId: 'd', deleted: false, createdBy: '', kind: 'expense', date: '2026-11-12', amountIncl: 500, amountExcl: 400, categoryId: 'c', method: 'cash', status: 'paid' },
+  ] as Entry[]);
+  render(<Home onGo={vi.fn()} />);
+  expect(await screen.findByText('Most amounts here include tax — add HT amounts under More to see a true HT profit')).toBeTruthy();
+  expect(screen.queryByText('2 amounts include tax')).toBeNull();
+});
