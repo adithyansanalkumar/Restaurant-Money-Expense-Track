@@ -93,13 +93,15 @@ Needs Node.js on the computer (https://nodejs.org, the "LTS" download). Open a t
 
 ## Part 2. The sharing check (10 minutes, two Google accounts)
 
+Do this after Part 3 (it needs the app installed and signed in).
+
 Why: to let Adithyan's phone see Dad's restaurant, the app can use one of two methods. The app is built
 to use the safer "pick the file" method, which works either way, so this check is only to confirm
 everything behaves on real accounts.
 
 1. On Dad's phone (account A), finish Part 3 and add one expense.
 2. In Settings, **Sharing**, share with account B's Gmail address.
-3. On a second phone or browser signed in as account B: **Settings, Open a shared restaurant**, pick the
+3. On a second phone or browser signed in as account B: **Settings, Account, Open a shared restaurant**, pick the
    `ledger.json` file. Check the expense appears.
 4. Write the result here: **Result: ______ (date ______)**.
 
@@ -135,8 +137,9 @@ Open the Pages URL in the phone's browser.
 
 1. On Dad's phone: **Settings, Sharing, Share with someone**, type Adithyan's Gmail address. Do this first.
 2. On Adithyan's phone: install the app as in Part 3.
-3. On the first screen sign in with Adithyan's Google account; at set-up choose **Open a shared restaurant**
-   (also under Settings, Account).
+3. On the first screen sign in with Adithyan's Google account. If it goes to "Set up your restaurant", tap
+   **Joining a shared restaurant? Open it here** at the bottom. (Already set up? Use **Settings, Account,
+   Open a shared restaurant** instead.)
 4. Google shows a file picker: choose **`ledger.json`** (shared with you). Done: both phones now show the same accounts.
 5. Entries sync by themselves when online; **Sync now** on Home or Settings forces it.
 
@@ -168,7 +171,7 @@ Open the Pages URL in the phone's browser.
   from Google AI Studio. Privacy note: the bill photo is then sent to Google, and on the free plan Google may use
   it to improve its products. The key stays on that phone only.
 - **Offline**: everything works without internet (adding, scanning, reports). Changes wait on the phone and
-  sync when the connection is back. The header shows "Offline, will retry".
+  sync when the connection is back. The header shows "Offline — will retry".
 - **Changing phones**: install the app, sign in with the **same Google account**, and the accounts come back.
   Bill photos come back only if photo backup was on.
 - **Sign out one phone**: Settings, Account. **Disconnect Google completely** signs out every phone using the account;

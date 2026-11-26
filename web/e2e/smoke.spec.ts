@@ -51,7 +51,6 @@ test('first run, add an expense, see it on Home, export to Excel', async ({ page
   // Bills tab (no camera needed to view it)
   await page.getByRole('link', { name: 'Bills' }).click();
   await expect(page.getByRole('heading', { name: 'Bills' })).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: `${SHOTS}/bills.png` });
 
   // BillCheck view: feed a picture to the file input (no camera needed); best effort, OCR may not finish offline

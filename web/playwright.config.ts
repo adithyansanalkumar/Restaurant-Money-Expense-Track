@@ -9,6 +9,7 @@ export default defineConfig({
     ...devices['iPhone 13'],
     // iPhone 13 would use WebKit; only Chromium is installed here, so keep its viewport/UA but run Chromium.
     defaultBrowserType: 'chromium',
+    viewport: { width: 390, height: 844 },
     acceptDownloads: true,
     locale: 'en-GB',
   },
