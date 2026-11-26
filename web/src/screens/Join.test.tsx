@@ -84,3 +84,11 @@ test('abandoning Join after signing in here (adoptPending) signs out before rout
   expect(auth.signOut).toHaveBeenCalledTimes(1);
   expect(auth.signOut.mock.invocationCallOrder[0]).toBeLessThan(go.mock.invocationCallOrder[0]);
 });
+
+test('a phone holding another account\'s restaurant (no ledger chosen) says so: open it again', async () => {
+  auth.email = 'son@x.com';
+  await db.settings.put({ id: 'shared', updatedAt: 5, deviceId: 'dad', deleted: false, restaurantName: 'Chez Dad', country: 'FR', currency: 'EUR', billLanguage: 'fra', taxView: 'incl', photoBackup: false, ocrMode: 'device', ownerEmail: 'dad@x.com' });
+  await db.meta.put({ key: 'adoptPending', value: true });
+  render(<Join onGo={vi.fn()} />);
+  expect(await screen.findByText('This phone belongs to dad@x.com’s restaurant — open it again')).toBeTruthy();
+});

@@ -247,6 +247,47 @@ describe('sign-in hardening', () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
+  it('signOut on a joined phone keeps the joined ref as lastJoinedRef (and the account)', async () => {
+    await db.meta.bulkPut([
+      { key: 'auth', value: { session: 'S', email: 'adi@x.com' } }, { key: 'account', value: { email: 'adi@x.com' } },
+      { key: 'ledgerRef', value: { fileId: 'L', joined: true } },
+    ]);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await signOut();
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect((await db.meta.get('lastJoinedRef'))?.value).toEqual({ fileId: 'L', joined: true });
+    expect((await db.meta.get('account'))?.value).toEqual({ email: 'adi@x.com' });
+  });
+
+  it('disconnectGoogle on a joined phone also keeps lastJoinedRef; an own ref is not kept', async () => {
+    await db.meta.bulkPut([{ key: 'auth', value: { session: 'S', email: 'adi@x.com' } }, { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L', joined: true } }]);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await disconnectGoogle();
+    expect((await db.meta.get('lastJoinedRef'))?.value).toEqual({ folderId: 'F', fileId: 'L', joined: true });
+    await db.meta.clear();
+    await db.meta.bulkPut([{ key: 'auth', value: { session: 'S', email: 'a@b.com' } }, { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }]);
+    await signOut();
+    expect(await db.meta.get('lastJoinedRef')).toBeUndefined();
+  });
+
+  it('the same account signing in again restores lastJoinedRef as the ledger ref (no adoption pending)', async () => {
+    await db.meta.bulkPut([{ key: 'account', value: { email: 'adi@x.com' } }, { key: 'lastJoinedRef', value: { fileId: 'L', joined: true } }]);
+    fetchMock.mockResolvedValueOnce(ok('S2', 'Adi@x.com'));
+    await signIn();
+    expect((await db.meta.get('ledgerRef'))?.value).toEqual({ fileId: 'L', joined: true });
+    expect(await db.meta.get('lastJoinedRef')).toBeUndefined();
+    expect(await db.meta.get('adoptPending')).toBeUndefined();
+  });
+
+  it('lastJoinedRef without a matching account is cleared on sign-in (adoption decides)', async () => {
+    await db.meta.put({ key: 'lastJoinedRef', value: { fileId: 'L', joined: true } });
+    fetchMock.mockResolvedValueOnce(ok('S2', 'c@d.com'));
+    await signIn();
+    expect(await db.meta.get('lastJoinedRef')).toBeUndefined();
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect((await db.meta.get('adoptPending'))?.value).toBe(true);
+  });
+
   it('signOut notifies (sync bumps its generation) before deleting the meta', async () => {
     await db.meta.bulkPut([{ key: 'auth', value: { session: 'S', email: 'a@b.com' } }, { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }]);
     let refAtNotify: unknown = 'unset';

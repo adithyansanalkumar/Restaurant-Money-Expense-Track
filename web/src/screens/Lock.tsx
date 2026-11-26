@@ -1,3 +1,4 @@
+import { goTo } from '../ui/router';
 import { useCallback, useEffect, useState } from 'react';
 import { Glass } from '../ui/Glass';
 import { t, useLanguage } from '../i18n';
@@ -42,6 +43,7 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
       if (!sameEmail(r.email, authEmail)) throw Object.assign(new Error('mismatch'), { name: 'EmailMismatch' });
       await clearPin();
       onUnlock();
+      if (r.result === 'needsJoin') goTo('join'); // someone else's restaurant on this phone: reopen it
     } catch (e) {
       setForgotError((e as Error | undefined)?.name === 'EmailMismatch'
         ? t('lock.forgotMismatch', { email: authEmail })

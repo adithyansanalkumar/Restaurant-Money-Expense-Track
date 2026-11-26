@@ -5,6 +5,7 @@ import { primaryBtn } from '../lock/PinPad';
 import { useSignInLater } from '../ui/useSignIn';
 import { SignInPrompts } from '../ui/ConsentNotice';
 import { adoptExistingLedger, type AdoptResult } from '../sync/onboard';
+import { goTo } from '../ui/router';
 import { currentEmail, signOut } from '../sync/auth';
 import { errorText, iconTile, mutedText, noticeText, screenCol, screenTitle, secondaryBtn } from '../ui/styles';
 
@@ -30,6 +31,7 @@ export function Welcome({ onSetup, onDone }: { onSetup: () => void; onDone: () =
   const settle = (r: AdoptResult | 'kept') => {
     if (r === 'adopted') onDone();
     else if (r === 'none' || r === 'kept') onSetup();
+    else if (r === 'needsJoin') goTo('join');
     else {
       if (r === 'authNeeded') setEmail(null); // session gone: the next tap signs in again
       setError(t('welcome.driveError'));

@@ -139,6 +139,13 @@ export async function signIn(opts: SignInOptions = {}): Promise<{ email: string 
   await db.transaction('rw', db.meta, async () => {
     await db.meta.put({ key: 'auth', value: { session: d.session, email: d.email } satisfies StoredAuth });
     await db.meta.put({ key: 'account', value: { email: d.email } satisfies StoredAccount });
+    // A joined phone that signed out kept its joined ref (lastJoinedRef): the same account gets it
+    // back as is, so it never splits off into a copy of its own. Any other account drops it.
+    const joined = (await db.meta.get('lastJoinedRef'))?.value;
+    if (joined) {
+      await db.meta.delete('lastJoinedRef');
+      if (last && !(await db.meta.get('ledgerRef'))) await db.meta.put({ key: 'ledgerRef', value: joined });
+    }
     // No ledger chosen yet: this account may already have one. Background sync waits (adoptPending)
     // until adoptExistingLedger / openShared settled it, so local shared settings can't be pushed.
     if (!(await db.meta.get('ledgerRef'))) await db.meta.put({ key: 'adoptPending', value: true });
@@ -186,7 +193,10 @@ async function refresh(myEpoch: number): Promise<string> {
   return d.accessToken;
 }
 
-/** Sign out this phone (its session only; the account's other phones stay signed in). Keeps meta 'account'. */
+/**
+ * Sign out this phone (its session only; the account's other phones stay signed in). Keeps meta
+ * 'account', and a joined ref as meta 'lastJoinedRef' (restored when the same account signs in).
+ */
 export async function signOut(): Promise<void> {
   await endSession('/revoke');
 }
@@ -206,5 +216,11 @@ async function endSession(path: '/revoke' | '/disconnect'): Promise<void> {
   if (auth) {
     try { await post(path, { session: auth.session }); } catch { /* best effort */ }
   }
-  await db.meta.bulkDelete(['auth', 'ledgerRef', 'lastSync', 'adoptPending']);
+  await db.transaction('rw', db.meta, async () => {
+    // A joined ref is kept aside (meta 'account' stays too), so signing back in with the same
+    // account reopens the shared restaurant instead of adopting or creating a ledger of its own.
+    const ref = (await db.meta.get('ledgerRef'))?.value as { joined?: boolean } | undefined;
+    if (ref?.joined) await db.meta.put({ key: 'lastJoinedRef', value: ref });
+    await db.meta.bulkDelete(['auth', 'ledgerRef', 'lastSync', 'adoptPending']);
+  });
 }

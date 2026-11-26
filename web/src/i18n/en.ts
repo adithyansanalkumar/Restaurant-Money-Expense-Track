@@ -243,6 +243,7 @@ export const en = {
   'join.noRestaurant': "That ledger has no restaurant settings yet. Ask the owner to open the app once.",
   'join.error': "Could not open the shared restaurant. Please try again.",
   'join.back': "Back",
+  'join.reopen': "This phone belongs to {owner}’s restaurant — open it again",
   'share.title': "Share with someone",
   'share.hint': "They get edit access to the restaurant’s Drive folder and an email from Google.",
   'share.email': "Email address",

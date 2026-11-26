@@ -253,6 +253,17 @@ test('signed out: Sign in with Google runs signInLater (adoption decides)', asyn
   expect(await screen.findByText('Share with someone')).toBeTruthy();
 });
 
+test('signed out former joiner: sign-in that ends in needsJoin sends the user to Join', async () => {
+  auth.email = null;
+  await db.meta.delete('ledgerRef');
+  auth.signIn.mockImplementation(async () => { auth.email = 'son@x.com'; return { email: 'son@x.com' }; });
+  adopt.mockResolvedValue('needsJoin');
+  const go = vi.fn();
+  render(<Settings onGo={go} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('join'));
+});
+
 test('owner can rename the restaurant (shared setting); a non-owner sees it read-only', async () => {
   const { unmount } = render(<Settings onGo={vi.fn()} />);
   const input = await screen.findByLabelText('Restaurant name');

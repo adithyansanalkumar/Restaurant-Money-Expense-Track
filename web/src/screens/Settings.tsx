@@ -109,6 +109,7 @@ export function Settings({ onGo }: { onGo: (r: Route) => void }) {
 
   // ---- sign in / out ----
   const showResult = (r: AdoptResult | 'kept') => {
+    if (r === 'needsJoin') { onGo('join'); return; } // someone else's restaurant: Join explains and reopens it
     if (r !== 'adopted' && r !== 'none' && r !== 'kept') setMsg({ ok: false, text: t('welcome.driveError') });
   };
   const doSignIn = async (viaReset = false) => {

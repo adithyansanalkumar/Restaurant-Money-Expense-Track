@@ -22,7 +22,13 @@ const drive = {
 vi.mock('./drive', () => Object.fromEntries(['ensureFolder', 'findFolder', 'listFiles', 'findFile', 'readJson', 'getVersion', 'writeJson'].map((k) => [k, (...a: unknown[]) => (drive as any)[k](...a)])));
 const signOut = vi.fn(async () => {});
 const signIn = vi.fn(async (_o?: unknown) => ({ email: 'dad@x.com' }));
-vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: async () => 'TOK', currentEmail: async () => 'dad@x.com', signOut: () => signOut(), signIn: (o?: unknown) => signIn(o) }));
+const me = vi.hoisted(() => ({ email: 'dad@x.com' as string | null }));
+const realAuth = vi.hoisted(() => ({} as Partial<typeof import('./auth')>));
+vi.mock('./auth', async (orig) => {
+  const mod = await orig<typeof import('./auth')>();
+  Object.assign(realAuth, mod);
+  return { ...mod, getAccessToken: async () => 'TOK', currentEmail: async () => me.email, signOut: () => signOut(), signIn: (o?: unknown) => signIn(o) };
+});
 
 import { adoptExistingLedger, resumeAdoptionIfPending, signInLater } from './onboard';
 import { stopSync, syncNow } from './sync';
@@ -40,7 +46,9 @@ beforeEach(async () => {
   files.clear();
   for (const f of Object.values(drive)) f.mockClear();
   signOut.mockClear();
-  signIn.mockClear();
+  signIn.mockReset();
+  signIn.mockImplementation(async () => ({ email: 'dad@x.com' }));
+  me.email = 'dad@x.com';
   drive.findFolder.mockImplementation(async () => null);
   drive.findFile.mockImplementation(async () => null);
 });
@@ -181,5 +189,63 @@ describe('resume and dedupe', () => {
     const [a, b] = await Promise.all([adoptExistingLedger(), adoptExistingLedger()]);
     expect([a, b]).toEqual(['none', 'none']);
     expect(drive.findFolder).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a phone that joined someone else\'s restaurant (C1)', () => {
+  const joinedLocal = async () => {
+    await db.settings.put({ ...(ledger.settings[0] as any) });
+    await db.entries.put({ id: 'e1', updatedAt: 50, deviceId: 'me', deleted: false, kind: 'expense', date: '2026-11-01', amountIncl: 700, categoryId: 'c', method: 'cash', createdBy: 'adi@x.com' } as any);
+    await reloadSettings();
+  };
+  it('former joiner signs back in: the same account gets its joined ref back; no new ledger, ownerEmail unchanged', async () => {
+    vi.stubEnv('VITE_AUTH_URL', 'https://auth.test');
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'cid');
+    const fetchMock = vi.fn(async (url: string) => url.endsWith('/exchange')
+      ? new Response(JSON.stringify({ session: 'S2', accessToken: 'AT', expiresIn: 3600, email: 'adi@x.com' }), { status: 200 })
+      : new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    let cb: (r: { code?: string }) => void = () => {};
+    (window as any).google = { accounts: { oauth2: { initCodeClient: (cfg: any) => { cb = cfg.callback; return { requestCode: () => cb({ code: 'C' }) }; } } } };
+    try {
+      me.email = 'adi@x.com';
+      files.set('L', { data: ledger, version: 9 });
+      await joinedLocal();
+      await db.meta.bulkPut([
+        { key: 'auth', value: { session: 'S1', email: 'adi@x.com' } }, { key: 'account', value: { email: 'adi@x.com' } },
+        { key: 'ledgerRef', value: { fileId: 'L', joined: true } },
+      ]);
+      await realAuth.signOut!();
+      expect(await db.meta.get('ledgerRef')).toBeUndefined();
+      signIn.mockImplementation((o?: unknown) => realAuth.signIn!(o as never));
+      expect((await signInLater()).result).toBe('kept');
+      expect((await db.meta.get('ledgerRef'))?.value).toEqual({ fileId: 'L', joined: true });
+      expect(await db.meta.get('adoptPending')).toBeUndefined();
+      await vi.waitFor(() => expect(drive.readJson).toHaveBeenCalledWith('L'));
+      await vi.waitFor(() => expect(files.get('L')!.version).toBe(10)); // e1 pushed to the shared file
+      expect(drive.findFolder).not.toHaveBeenCalled();
+      expect(drive.ensureFolder).not.toHaveBeenCalled();
+      expect(files.has('new')).toBe(false); // no ledger of its own
+      expect(await db.settings.get('shared')).toMatchObject({ ownerEmail: 'dad@x.com', restaurantName: 'Chez Dad' });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+  });
+  it('the local restaurant belongs to another account: needsJoin, ownerEmail never stamped over, nothing looked up or written', async () => {
+    me.email = 'adi@x.com';
+    await joinedLocal();
+    await db.meta.put({ key: 'adoptPending', value: true });
+    expect(await adoptExistingLedger()).toBe('needsJoin');
+    expect(await db.settings.get('shared')).toMatchObject({ ownerEmail: 'dad@x.com', updatedAt: 5 });
+    expect((await db.meta.get('adoptPending'))?.value).toBe(true); // background sync stays off until Join
+    expect(drive.findFolder).not.toHaveBeenCalled();
+    expect(drive.writeJson).not.toHaveBeenCalled();
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+  });
+  it('the owner\'s own email (any case) is not needsJoin', async () => {
+    me.email = 'DAD@x.com';
+    await joinedLocal();
+    expect(await adoptExistingLedger()).toBe('none');
   });
 });

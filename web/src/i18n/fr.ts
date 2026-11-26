@@ -245,6 +245,7 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'join.noRestaurant': "Ce registre n’a pas encore de réglages. Demandez au propriétaire d’ouvrir l’application une fois.",
   'join.error': "Impossible d’ouvrir le restaurant partagé. Réessayez.",
   'join.back': "Retour",
+  'join.reopen': "Ce téléphone appartient au restaurant de {owner} — ouvrez-le à nouveau",
   'share.title': "Partager avec quelqu’un",
   'share.hint': "La personne peut modifier le dossier Drive du restaurant et reçoit un e-mail de Google.",
   'share.email': "Adresse e-mail",

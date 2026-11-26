@@ -4,6 +4,7 @@ import { adoptExistingLedger, type AdoptResult } from '../sync/onboard';
 import { t, useLanguage } from '../i18n';
 import { useSignInLater } from './useSignIn';
 import { SignInPrompts } from './ConsentNotice';
+import { goTo } from './router';
 
 function when(at: number, lang: string): string {
   const d = new Date(at);
@@ -19,6 +20,7 @@ export function SyncStatus({ style }: { style?: React.CSSProperties }) {
   const s = useSignInLater();
   const [failed, setFailed] = useState(false);
   const report = (r: AdoptResult | 'kept') => {
+    if (r === 'needsJoin') { setFailed(false); goTo('join'); return; } // someone else's restaurant: reopen it
     setFailed(r !== 'adopted' && r !== 'none' && r !== 'kept');
     void syncNow(); // refresh the line: synced, or still pending
   };

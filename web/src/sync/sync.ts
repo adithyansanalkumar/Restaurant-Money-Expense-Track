@@ -76,7 +76,7 @@ let generation = 0;
  */
 export async function resetLedgerState(): Promise<void> {
   resetTimers();
-  await db.meta.bulkDelete(['ledgerRef', 'lastSync']);
+  await db.meta.bulkDelete(['ledgerRef', 'lastSync', 'lastJoinedRef']);
 }
 
 function resetTimers(): void {
@@ -363,7 +363,7 @@ export async function resetPhone(): Promise<void> {
     try {
       for (const t of LEDGER_TABLES) await tbl(t).clear();
       await db.photos.clear();
-      await db.meta.bulkDelete(['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth']);
+      await db.meta.bulkDelete(['ledgerRef', 'lastSync', 'account', 'adoptPending', 'auth', 'lastJoinedRef']);
     } finally {
       applyingTx = null;
     }

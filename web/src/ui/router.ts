@@ -13,6 +13,11 @@ export function parseRoute(hash: string): Route {
   return (ROUTES as readonly string[]).includes(name) ? (name as Route) : 'home';
 }
 
+/** Navigate from outside a screen's onGo (e.g. the sync status line). */
+export function goTo(r: Route): void {
+  window.location.hash = `#/${r}`;
+}
+
 export function useRoute(): [Route, (r: Route) => void] {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
   useEffect(() => {

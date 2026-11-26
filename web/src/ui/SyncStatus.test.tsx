@@ -88,3 +88,15 @@ test('pending Retry: when the lookup says authNeeded it falls back to signing in
   await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
   expect(adopt).toHaveBeenCalledTimes(1); // the lookup that said authNeeded
 });
+
+test('pending Retry: needsJoin opens the Join screen', async () => {
+  await db.meta.put({ key: 'adoptPending', value: true });
+  window.location.hash = '#/home';
+  render(<SyncStatus />);
+  await act(async () => { await syncNow(); await syncNow(); });
+  await screen.findByText('Not syncing yet — finish connecting');
+  adopt.mockReset();
+  adopt.mockResolvedValueOnce('needsJoin');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(window.location.hash).toBe('#/join'));
+});

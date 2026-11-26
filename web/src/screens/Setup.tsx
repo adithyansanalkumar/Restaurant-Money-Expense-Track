@@ -51,6 +51,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       if ((await isAdoptPending()) && (await currentEmail())) {
         const r = await adoptExistingLedger();
         if (r === 'adopted') { onGo('home'); return; }
+        if (r === 'needsJoin') { onGo('join'); return; }
         if (r !== 'none') { setDriveError(true); return; }
       }
       // Shared settings go last: once that row exists, App stops routing to setup.

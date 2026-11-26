@@ -7,16 +7,36 @@ import {
   restoreLocalShared, setLedgerRef, syncFresh, syncNow, type SyncStatusCode,
 } from './sync';
 
-export type AdoptResult = 'adopted' | 'none' | Exclude<SyncStatusCode, 'ok' | 'pending'>;
+/**
+ * 'needsJoin': the restaurant on this phone belongs to another account (it was joined, then signed
+ * out). Nothing was looked up or written and adoptPending stays set; the UI sends the user to Join.
+ */
+export type AdoptResult = 'adopted' | 'none' | 'needsJoin' | Exclude<SyncStatusCode, 'ok' | 'pending'>;
 
-/** With no ledger for this account, this phone is the owner: stamp ownerEmail on a local restaurant (if any). */
-async function becomeOwner(): Promise<void> {
+const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The local restaurant's owner when it is not the signed-in account (never stamp over it), else null. */
+export async function otherOwner(): Promise<string | null> {
+  const local = await db.settings.get('shared');
+  const owner = local && !local.deleted ? local.ownerEmail?.trim() : '';
+  if (!owner) return null;
+  const email = await currentEmail();
+  return email && sameEmail(email, owner) ? null : owner;
+}
+
+/**
+ * With no ledger for this account, this phone is the owner: stamp ownerEmail on a local restaurant
+ * (if any). False (nothing done) when that restaurant belongs to another account.
+ */
+async function becomeOwner(): Promise<boolean> {
   await reloadSettings();
+  if (await otherOwner()) return false;
   const email = await currentEmail();
   const local = await db.settings.get('shared');
   if (email && local) await saveShared({ ownerEmail: email });
   await clearAdoptPending();
   if (local) void syncNow(); // a restaurant made signed out: its first upload (first run waits for Setup)
+  return true;
 }
 
 /**
@@ -45,6 +65,8 @@ export async function resumeAdoptionIfPending(): Promise<AdoptResult | null> {
 }
 
 async function doAdopt(): Promise<AdoptResult> {
+  // someone else's restaurant on this phone: neither adopt this account's Drive nor become owner
+  if (await otherOwner()) return 'needsJoin';
   let fileId: string | null = null;
   let folderId: string | null = null;
   try {
@@ -56,10 +78,7 @@ async function doAdopt(): Promise<AdoptResult> {
     if (e instanceof Offline || name === 'Offline') return 'offline';
     return 'error';
   }
-  if (!folderId || !fileId) {
-    await becomeOwner();
-    return 'none';
-  }
+  if (!folderId || !fileId) return (await becomeOwner()) ? 'none' : 'needsJoin';
   interruptSync(); // nothing that started earlier may write from here on
   const dropped = await dropLocalShared(); // before the ref exists, so no sync can push it
   await setLedgerRef({ folderId, fileId });
@@ -77,8 +96,7 @@ async function doAdopt(): Promise<AdoptResult> {
   if (!shared || shared.deleted) {
     // a ledger with no restaurant in it: keep ours, as the owner
     await rollback();
-    await becomeOwner();
-    return 'none';
+    return (await becomeOwner()) ? 'none' : 'needsJoin';
   }
   await clearAdoptPending();
   await reloadSettings();

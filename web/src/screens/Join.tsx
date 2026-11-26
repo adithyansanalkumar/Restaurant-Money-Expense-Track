@@ -8,6 +8,8 @@ import { SignInPrompts } from '../ui/ConsentNotice';
 import { currentEmail, signOut } from '../sync/auth';
 import { isAdoptPending } from '../sync/sync';
 import { JOIN_MODE, openShared } from '../sync/share';
+import { otherOwner } from '../sync/onboard';
+import { db } from '../db/db';
 import { useSettings } from '../settings/store';
 import { errorText, iconTile, linkBtn, mutedText, noticeText, screenCol, screenTitle } from '../ui/styles';
 
@@ -22,12 +24,19 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
   const [email, setEmail] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // this phone holds someone else's restaurant but no ledger is chosen (it signed out): reopen it
+  const [reopen, setReopen] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
     void currentEmail().then((e) => { if (live) setEmail(e); }, () => {});
+    void (async () => {
+      const owner = await otherOwner();
+      const ref = await db.meta.get('ledgerRef');
+      if (live) setReopen(owner && !ref ? owner : null);
+    })().catch(() => {});
     return () => { live = false; };
-  }, []);
+  }, [email]);
 
   const doSignIn = async (viaReset = false) => {
     setError(null);
@@ -71,6 +80,7 @@ export function Join({ onGo }: { onGo: (r: Route) => void }) {
       <div style={screenTitle}>{t('join.title')}</div>
       <div style={{ ...mutedText, fontSize: 14, marginTop: -6 }}>{t('join.subtitle')}</div>
       <Glass style={{ alignSelf: 'stretch', borderRadius: 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {reopen && <div role="status" style={noticeText}>{t('join.reopen', { owner: reopen })}</div>}
         {email
           ? <>
               <div style={mutedText}>{t('auth.signedInAs', { email })}</div>
