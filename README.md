@@ -101,7 +101,8 @@ everything behaves on real accounts.
 
 1. On Dad's phone (account A), finish Part 3 and add one expense.
 2. In Settings, **Sharing**, share with account B's Gmail address.
-3. On a second phone or browser signed in as account B: **Settings, Account, Open a shared restaurant**, pick the
+3. On a second phone or browser, open the app and sign in with account B. When it shows "Set up your
+   restaurant", tap **Joining a shared restaurant? Open it here** at the bottom (as in Part 4), then pick the
    `ledger.json` file. Check the expense appears.
 4. Write the result here: **Result: ______ (date ______)**.
 
@@ -139,7 +140,8 @@ Open the Pages URL in the phone's browser.
 2. On Adithyan's phone: install the app as in Part 3.
 3. On the first screen sign in with Adithyan's Google account. If it goes to "Set up your restaurant", tap
    **Joining a shared restaurant? Open it here** at the bottom. (Already set up? Use **Settings, Account,
-   Open a shared restaurant** instead.)
+   Open a shared restaurant** instead. If the phone already has entries, for example a test restaurant, the app
+   asks whether to **add them** to Dad's books or **erase them first**; choose erase for test data.)
 4. Google shows a file picker: choose **`ledger.json`** (shared with you). Done: both phones now show the same accounts.
 5. Entries sync by themselves when online; **Sync now** on Home or Settings forces it.
 
@@ -168,7 +170,9 @@ Open the Pages URL in the phone's browser.
   don't see theirs): it shows "Photo not on this phone" instead.
 - **PIN and Face ID**: Settings, **App lock**, set a PIN; you can add Face ID or fingerprint on top.
 - **Forgot PIN?** The button appears only when the phone is signed in. Sign in again with the same Google
-  account and the PIN is cleared so you can set a new one.
+  account and the PIN is cleared so you can set a new one. Be aware: if the phone's browser is still signed in to
+  Google, that is a single tap with no password. So the PIN keeps out someone who picks up the phone but cannot
+  unlock it (or its Google session); it is not protection against someone who can.
 - **Google AI bill reading is optional and off by default.** Bills are normally read on the phone and nothing
   leaves it. To turn on the more accurate reading: Settings, **Bill reading**, **Google AI**, and paste a free key
   from Google AI Studio. Privacy note: the bill photo is then sent to Google, and on the free plan Google may use
@@ -178,7 +182,14 @@ Open the Pages URL in the phone's browser.
 - **Changing phones**: install the app, sign in with the **same Google account**, and the accounts come back.
   Bill photos come back (when you open the Bills tab or a photo) only if photo backup was on on the old phone.
 - **Sign out one phone**: Settings, Account. **Disconnect Google completely** signs out every phone using the account;
-  your data stays in Drive.
+  your data stays in Drive. A phone that joined someone else's restaurant (Adithyan's) goes back to that shared
+  restaurant when it signs in again with the same account. If it ever says "This phone belongs to ...'s
+  restaurant — open it again", choose the shared `ledger.json` again.
+- **With tax / without tax (TTC / HT)**: amounts you type are the total with tax. To see a true HT profit, open
+  **More** when adding an entry and fill in **Amount excl. tax** or **Tax** (the other is worked out). Scanned bills
+  fill these in when the bill shows them. In HT view the app warns when most amounts have no HT value.
+- **Both people have the same rights** over the restaurant settings (name, country, currency, tax view). Only the
+  owner (Dad) can share it with someone new.
 
 ---
 
