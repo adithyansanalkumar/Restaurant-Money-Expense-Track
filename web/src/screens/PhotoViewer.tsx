@@ -4,6 +4,7 @@ import { setEditing } from '../ui/editing';
 import type { Entry, Id } from '../domain/types';
 import { db } from '../db/db';
 import { getPhoto, savePhotoToPhone } from '../photos/photos';
+import { restorePhoto } from '../photos/backup';
 import { t, useLanguage } from '../i18n';
 
 /** Full-screen bill photo with "Save to phone" and, when linked, a way to the expense. */
@@ -12,12 +13,15 @@ export function PhotoViewer({ photoId, onClose, onGo }: { photoId: Id; onClose: 
   const [url, setUrl] = useState<string>();
   const [entry, setEntry] = useState<Entry>();
   const [error, setError] = useState(false);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     let live = true;
     let made: string | undefined;
     void (async () => {
-      const blob = await getPhoto(photoId);
+      // not on this phone: bring it back from this account's Drive backup when there is one
+      const blob = (await getPhoto(photoId)) ?? (await restorePhoto(photoId)) ?? undefined;
+      if (!blob && live) setMissing(true);
       if (blob && live) { try { made = URL.createObjectURL(blob); setUrl(made); } catch { /* no preview */ } }
       const e = await db.entries.filter((x) => !x.deleted && x.photoId === photoId).first();
       if (live) setEntry(e);
@@ -44,10 +48,16 @@ export function PhotoViewer({ photoId, onClose, onGo }: { photoId: Id; onClose: 
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {missing && (
+          <div role="status" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: '#B3C8D9', fontSize: 14, textAlign: 'center' }}>
+            <svg aria-hidden="true" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>
+            {t('bills.notOnPhone')}
+          </div>
+        )}
         {url && <img src={url} alt={t('bills.photoAlt')} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 }} />}
       </div>
       {error && <div role="alert" style={{ color: '#FF8E8E', fontSize: 13, textAlign: 'center' }}>{t('bills.saveError')}</div>}
-      <button type="button" className="glass" onClick={() => void save()}
+      <button type="button" className="glass" disabled={missing} onClick={() => void save()}
         style={{ minHeight: 52, borderRadius: 26, font: '700 15px Inter, sans-serif', color: '#FFFFFF' }}>{t('bills.saveToPhone')}</button>
     </div>
   );

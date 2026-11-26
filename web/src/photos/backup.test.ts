@@ -6,13 +6,15 @@ import { reloadSettings, saveShared } from '../settings/store';
 const drive = vi.hoisted(() => ({
   ensureFolder: vi.fn(async (name: string, parent?: string) => (parent ? `${name}@${parent}` : 'ownFolder')),
   uploadBlob: vi.fn(async (_n: string, _p: string, _b: Blob, _m: string) => ({ id: 'x', version: '1' })),
+  findFolder: vi.fn(async (name: string, parent?: string): Promise<string | null> => (parent ? `${name}@${parent}` : 'ownFolder')),
+  downloadByName: vi.fn(async (_n: string, _p: string): Promise<Blob | null> => null),
 }));
 vi.mock('../sync/drive', async (orig) => ({ ...(await orig<typeof import('../sync/drive')>()), ...drive }));
 const auth = vi.hoisted(() => ({ email: 'adi@x.com' as string | null }));
 vi.mock('../sync/auth', async (orig) => ({ ...(await orig<typeof import('../sync/auth')>()), currentEmail: async () => auth.email }));
 
 import { Offline } from '../sync/auth';
-import { backupPendingPhotos } from './backup';
+import { _resetRestore, backupPendingPhotos, restorePhoto } from './backup';
 
 const photo = (id: string, createdAt: number, backedUp = false) => db.photos.put({ id, blob: new Blob([id], { type: 'image/jpeg' }), createdAt, backedUp });
 
@@ -115,5 +117,53 @@ describe('setting changes during a run', () => {
     await backupPendingPhotos();
     expect(drive.uploadBlob).toHaveBeenCalledTimes(1);
     expect((await db.photos.toArray()).filter((p) => !p.backedUp)).toHaveLength(2);
+  });
+});
+
+describe('restorePhoto (lazy, a photo an entry references but this phone lacks)', () => {
+  beforeEach(() => {
+    _resetRestore();
+    drive.findFolder.mockClear();
+    drive.downloadByName.mockReset().mockResolvedValue(new Blob(['IMG'], { type: 'image/jpeg' }));
+  });
+  it('downloads <photoId>.jpg from this account\'s Bills folder and stores it as backed up', async () => {
+    const b = await restorePhoto('p1');
+    expect(await b!.text()).toBe('IMG');
+    expect(drive.findFolder).toHaveBeenCalledWith('Bills', 'F1');
+    expect(drive.downloadByName).toHaveBeenCalledWith('p1.jpg', 'Bills@F1');
+    expect(await db.photos.get('p1')).toMatchObject({ id: 'p1', backedUp: true });
+  });
+  it('a photo already on the phone is returned without any Drive call', async () => {
+    await photo('p1', 1);
+    expect(await restorePhoto('p1')).toBeTruthy();
+    expect(drive.downloadByName).not.toHaveBeenCalled();
+  });
+  it('nothing when backup is off, signed out, or adoption is pending', async () => {
+    await saveShared({ photoBackup: false });
+    expect(await restorePhoto('p1')).toBeNull();
+    await saveShared({ photoBackup: true });
+    auth.email = null;
+    expect(await restorePhoto('p1')).toBeNull();
+    auth.email = 'adi@x.com';
+    await db.meta.put({ key: 'adoptPending', value: true });
+    expect(await restorePhoto('p1')).toBeNull();
+    expect(drive.downloadByName).not.toHaveBeenCalled();
+  });
+  it('not in Drive (e.g. the other person\'s photo): null, nothing stored; offline is quiet', async () => {
+    drive.downloadByName.mockResolvedValueOnce(null);
+    expect(await restorePhoto('p1')).toBeNull();
+    expect(await db.photos.count()).toBe(0);
+    drive.downloadByName.mockRejectedValueOnce(new Offline());
+    expect(await restorePhoto('p2')).toBeNull();
+  });
+  it('no Bills folder: null without creating one', async () => {
+    drive.findFolder.mockResolvedValueOnce(null);
+    expect(await restorePhoto('p1')).toBeNull();
+    expect(drive.downloadByName).not.toHaveBeenCalled();
+    expect(drive.ensureFolder).not.toHaveBeenCalledWith('Bills', expect.anything());
+  });
+  it('overlapping calls for one photo share one download', async () => {
+    await Promise.all([restorePhoto('p1'), restorePhoto('p1')]);
+    expect(drive.downloadByName).toHaveBeenCalledTimes(1);
   });
 });

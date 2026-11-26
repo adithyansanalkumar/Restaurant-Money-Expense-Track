@@ -129,3 +129,10 @@ export function shareFolder(id: Id, email: string): Promise<void> {
 export function shareFile(id: Id, email: string): Promise<void> {
   return shareWith(id, email);
 }
+
+/** Downloads the oldest file with this name in the folder (alt=media), or null when there is none. */
+export async function downloadByName(name: string, parentId: Id): Promise<Blob | null> {
+  const f = await findFile(name, parentId);
+  if (!f) return null;
+  return (await driveFetch(`${API}/files/${encodeURIComponent(f.id)}?alt=media`)).blob();
+}

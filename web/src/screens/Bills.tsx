@@ -3,6 +3,8 @@ import { Glass } from '../ui/Glass';
 import type { Route } from '../ui/router';
 import type { Id, Supplier } from '../domain/types';
 import { listLive } from '../db/repo';
+import { db } from '../db/db';
+import { restorePhoto } from '../photos/backup';
 import { compressPhoto, deletePhoto, listPhotos, saveAllPhotos, savePhoto } from '../photos/photos';
 import { readBill } from '../ocr/ocr';
 import { getGeminiKey, readBillWithGemini } from '../ocr/gemini';
@@ -12,7 +14,8 @@ import { useSettings } from '../settings/store';
 import { BillCheck } from './BillCheck';
 import { PhotoViewer } from './PhotoViewer';
 
-interface Thumb { id: Id; url: string; date: string }
+/** missing: an entry references this photo but it is not on this phone (placeholder until restored). */
+interface Thumb { id: Id; url: string; date: string; missing?: boolean }
 interface Checking { photoId: Id; url?: string; parsed: ParsedReceipt; suppliers: Supplier[]; ocrFailed: boolean }
 
 export function Bills({ onGo }: { onGo: (r: Route) => void }) {
@@ -26,16 +29,30 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
   const [viewing, setViewing] = useState<Id | null>(null);
   const [notice, setNotice] = useState('');
 
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
   const load = useCallback(async () => {
     const rows = await listPhotos();
+    const have = new Set(rows.map((r) => r.id));
+    const lacking = new Map<Id, string>();
+    await db.entries.each((e) => { if (!e.deleted && e.photoId && !have.has(e.photoId)) lacking.set(e.photoId, e.date); });
+    if (!alive.current) return;
     setThumbs((old) => {
-      old.forEach((x) => { try { URL.revokeObjectURL(x.url); } catch { /* ignore */ } });
-      return rows.map((r) => {
+      old.forEach((x) => { if (x.url) try { URL.revokeObjectURL(x.url); } catch { /* ignore */ } });
+      const local = rows.map((r) => {
         let url = '';
         try { url = URL.createObjectURL(r.blob); } catch { /* no preview */ }
         return { id: r.id, url, date: new Date(r.createdAt).toISOString().slice(0, 10) };
       });
+      return [...local, ...[...lacking].map(([id, date]) => ({ id, url: '', date, missing: true }))];
     });
+    // bring backed-up photos back (new phone): one at a time, then show what came back
+    let restored = false;
+    for (const id of lacking.keys()) {
+      if (!alive.current) return;
+      if (await restorePhoto(id)) restored = true;
+    }
+    if (restored && alive.current) await load();
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => () => { setThumbs((old) => { old.forEach((x) => { try { URL.revokeObjectURL(x.url); } catch { /* ignore */ } }); return []; }); }, []);
@@ -116,6 +133,7 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
               <button key={p.id} type="button" data-testid="bill-thumb" aria-label={t('bills.openBill', { date: p.date })} onClick={() => setViewing(p.id)}
                 style={{ aspectRatio: '3 / 4', minHeight: 44, border: '1px solid rgba(255,255,255,0.24)', borderRadius: 14, padding: 0, overflow: 'hidden', background: 'rgba(255,255,255,0.08)' }}>
                 {p.url && <img src={p.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
+                {p.missing && <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 8, fontSize: 11, lineHeight: 1.3, color: '#B3C8D9', textAlign: 'center' }}>{t('bills.notOnPhone')}</span>}
               </button>
             ))}
           </div>

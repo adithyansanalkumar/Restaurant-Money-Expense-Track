@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const getAccessToken = vi.fn();
 vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: (force?: boolean) => getAccessToken(force) }));
 
-import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, shareFile, getVersion } from './drive';
+import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, shareFile, getVersion, downloadByName } from './drive';
 import { Offline } from './auth';
 
 const fetchMock = vi.fn();
@@ -152,5 +152,22 @@ describe('network failures and getVersion', () => {
     expect(await getVersion('f1')).toBe('9');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('https://www.googleapis.com/drive/v3/files/f1?fields=version');
+  });
+});
+
+describe('downloadByName', () => {
+  it('finds the oldest file with that name in the folder and downloads it (alt=media)', async () => {
+    fetchMock.mockResolvedValueOnce(json({ files: [{ id: 'p9', version: '1' }] }))
+      .mockResolvedValueOnce(new Response('IMG', { status: 200, headers: { 'content-type': 'image/jpeg' } }));
+    const b = await downloadByName('p1.jpg', 'Bills1');
+    expect(await b!.text()).toBe('IMG');
+    const q = new URL(fetchMock.mock.calls[0][0]).searchParams.get('q');
+    expect(q).toBe("name='p1.jpg' and 'Bills1' in parents and trashed=false");
+    expect(fetchMock.mock.calls[1][0]).toBe('https://www.googleapis.com/drive/v3/files/p9?alt=media');
+  });
+  it('no such file: null, no download', async () => {
+    fetchMock.mockResolvedValueOnce(json({ files: [] }));
+    expect(await downloadByName('p1.jpg', 'Bills1')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

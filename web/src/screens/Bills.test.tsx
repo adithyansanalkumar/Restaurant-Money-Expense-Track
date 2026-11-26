@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { db } from '../db/db';
 import { setLanguage } from '../i18n';
 import { put, seedDefaults } from '../db/repo';
@@ -9,6 +9,8 @@ import type { Supplier } from '../domain/types';
 import { getEditing, setEditing } from '../ui/editing';
 
 vi.mock('../ocr/ocr', () => ({ readBill: vi.fn() }));
+const restore = vi.hoisted(() => vi.fn(async (_id: string): Promise<Blob | null> => null));
+vi.mock('../photos/backup', async (orig) => ({ ...(await orig<typeof import('../photos/backup')>()), restorePhoto: (id: string) => restore(id) }));
 vi.mock('../photos/photos', async (orig) => ({ ...(await orig<typeof import('../photos/photos')>()), compressPhoto: async (b: Blob) => b }));
 import { readBill } from '../ocr/ocr';
 import { Bills } from './Bills';
@@ -18,6 +20,7 @@ const TEXT = 'METRO CASH & CARRY\n25/11/2026\nTotal HT 153,80\nTVA 20% 30,70\nTO
 beforeEach(async () => {
   setLanguage('en'); setEditing(null);
   vi.mocked(readBill).mockReset();
+  restore.mockReset().mockResolvedValue(null);
   vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} }));
   await Promise.all(db.tables.map((t) => t.clear()));
   await seedDefaults();
@@ -194,4 +197,33 @@ test('offline goes straight to the phone', async () => {
   expect(readBill).toHaveBeenCalled();
   spy.mockRestore();
   vi.unstubAllGlobals();
+});
+
+test('a photo an entry references but this phone lacks: placeholder tile, then restored from Drive when possible', async () => {
+  await put('entries', { id: 'e1', kind: 'expense', date: '2026-11-20', amountIncl: 100, categoryId: 'c', method: 'cash', createdBy: '', photoId: 'gone' } as any);
+  render(<Bills onGo={vi.fn()} />);
+  expect(await screen.findByText('Photo not on this phone')).toBeInTheDocument();
+  await waitFor(() => expect(restore).toHaveBeenCalledWith('gone'));
+  cleanup();
+  restore.mockImplementation(async (id: string) => {
+    const blob = new Blob(['IMG'], { type: 'image/jpeg' });
+    await db.photos.put({ id, blob, createdAt: 1, backedUp: true });
+    return blob;
+  });
+  render(<Bills onGo={vi.fn()} />);
+  await waitFor(() => expect(document.querySelector('[data-testid="bill-thumb"] img')).toBeTruthy());
+  expect(screen.getAllByTestId('bill-thumb')).toHaveLength(1);
+  expect(screen.queryByText('Photo not on this phone')).toBeNull();
+});
+
+test('the viewer restores a missing photo, or says it is not on this phone', async () => {
+  const { PhotoViewer } = await import('./PhotoViewer');
+  render(<PhotoViewer photoId="gone" onClose={vi.fn()} onGo={vi.fn()} />);
+  expect(await screen.findByText('Photo not on this phone')).toBeInTheDocument();
+  expect(restore).toHaveBeenCalledWith('gone');
+  cleanup();
+  restore.mockResolvedValue(new Blob(['IMG'], { type: 'image/jpeg' }));
+  render(<PhotoViewer photoId="gone" onClose={vi.fn()} onGo={vi.fn()} />);
+  expect(await screen.findByRole('img', { name: 'Bill photo' })).toBeInTheDocument();
+  expect(screen.queryByText('Photo not on this phone')).toBeNull();
 });

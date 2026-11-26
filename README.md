@@ -162,7 +162,10 @@ Open the Pages URL in the phone's browser.
 ## Good to know
 
 - **Photos stay on the phone** unless you turn on **Settings, Back up bill photos to Google Drive**. With it
-  off, the amounts are safe in Drive but the pictures exist only on that phone.
+  off, the amounts are safe in Drive but the pictures exist only on that phone. With it on, the phone keeps a
+  copy of each photo in **your own** Google Drive (the Bills folder), and a new phone signed in with the same
+  account brings the photos back when you open them. The other person's phone does not see your photos (and you
+  don't see theirs): it shows "Photo not on this phone" instead.
 - **PIN and Face ID**: Settings, **App lock**, set a PIN; you can add Face ID or fingerprint on top.
 - **Forgot PIN?** The button appears only when the phone is signed in. Sign in again with the same Google
   account and the PIN is cleared so you can set a new one.
@@ -173,7 +176,7 @@ Open the Pages URL in the phone's browser.
 - **Offline**: everything works without internet (adding, scanning, reports). Changes wait on the phone and
   sync when the connection is back. The header shows "Offline — will retry".
 - **Changing phones**: install the app, sign in with the **same Google account**, and the accounts come back.
-  Bill photos come back only if photo backup was on.
+  Bill photos come back (when you open the Bills tab or a photo) only if photo backup was on on the old phone.
 - **Sign out one phone**: Settings, Account. **Disconnect Google completely** signs out every phone using the account;
   your data stays in Drive.
 
