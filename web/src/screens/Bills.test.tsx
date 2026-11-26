@@ -116,3 +116,22 @@ test('Retake opens the picker synchronously in the tap', async () => {
   expect(click).toHaveBeenCalledTimes(1);
   click.mockRestore();
 });
+
+test('the picker input survives Retake so the retaken photo is read', async () => {
+  vi.mocked(readBill).mockResolvedValue(TEXT);
+  vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+  render(<Bills onGo={vi.fn()} />);
+  const input = screen.getByTestId('bill-input');
+  pick();
+  await screen.findByText('Check the details');
+  fireEvent.click(screen.getByText('Retake'));
+  await waitFor(() => expect(screen.queryByText('Check the details')).toBeNull());
+  expect(screen.getByTestId('bill-input')).toBe(input);
+  expect(input.isConnected).toBe(true);
+  vi.mocked(readBill).mockClear();
+  fireEvent.change(input, { target: { files: [new File(['img2'], 'c.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Check the details');
+  expect(readBill).toHaveBeenCalledTimes(1);
+  expect(await db.photos.count()).toBe(1);
+  vi.restoreAllMocks();
+});

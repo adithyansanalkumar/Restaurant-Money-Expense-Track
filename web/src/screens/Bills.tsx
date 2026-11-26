@@ -79,20 +79,17 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
       onChange={(e) => void onPick(e.target.files?.[0])} />
   );
 
-  if (checking) {
-    return (
-      <>
-        {picker}
-        <BillCheck photoId={checking.photoId} photoUrl={checking.url} parsed={checking.parsed} suppliers={checking.suppliers}
-          ocrFailed={checking.ocrFailed} onRetake={retake} onClose={closeCheck} onGo={onGo} />
-      </>
-    );
-  }
-
+  // The picker lives at one stable position so the same DOM input survives check <-> grid switches
+  // (Retake opens the OS dialog, then the grid re-renders; its `change` must reach this input).
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 520, margin: '0 auto' }}>
-      <h1 style={{ margin: 0, fontFamily: "'Inter Tight', sans-serif", fontSize: 26, fontWeight: 800 }}>{t('bills.title')}</h1>
       {picker}
+      {checking ? (
+        <BillCheck photoId={checking.photoId} photoUrl={checking.url} parsed={checking.parsed} suppliers={checking.suppliers}
+          ocrFailed={checking.ocrFailed} onRetake={retake} onClose={closeCheck} onGo={onGo} />
+      ) : (
+        <>
+      <h1 style={{ margin: 0, fontFamily: "'Inter Tight', sans-serif", fontSize: 26, fontWeight: 800 }}>{t('bills.title')}</h1>
       <button type="button" className="glass" disabled={reading} onClick={() => input.current?.click()} style={{
         minHeight: 96, borderRadius: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, color: '#FFFFFF', font: '800 17px Inter, sans-serif',
       }}>
@@ -117,6 +114,8 @@ export function Bills({ onGo }: { onGo: (r: Route) => void }) {
         </>
       )}
       {viewing && <PhotoViewer photoId={viewing} onClose={() => setViewing(null)} onGo={onGo} />}
+        </>
+      )}
     </div>
   );
 }
