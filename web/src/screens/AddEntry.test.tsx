@@ -251,3 +251,15 @@ test('editing with a changed amount drops stale amountExcl/tax; unchanged keeps 
   expect(saved.amountExcl).toBeUndefined();
   expect(saved.tax).toBeUndefined();
 });
+
+test('a new entry (and its paid-now payment) is stamped with the signed-in email', async () => {
+  await db.meta.put({ key: 'auth', value: { session: 'S', email: 'dad@x.com' } });
+  const go = vi.fn();
+  render(<AddEntry onGo={go} />);
+  fireEvent.click(await screen.findByText('Metro'));
+  tap('1', '2');
+  fireEvent.click(screen.getByRole('button', { name: 'Save expense' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('home'));
+  expect((await db.entries.toArray())[0].createdBy).toBe('dad@x.com');
+  expect((await db.payments.toArray())[0].createdBy).toBe('dad@x.com');
+});

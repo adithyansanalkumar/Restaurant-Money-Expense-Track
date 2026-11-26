@@ -13,6 +13,9 @@ import { AddEntry } from './screens/AddEntry';
 import { t, useLanguage } from './i18n';
 import { useSettings } from './settings/store';
 import { Lock } from './screens/Lock';
+import { Welcome } from './screens/Welcome';
+import { Join } from './screens/Join';
+import { SharePanel } from './screens/SharePanel';
 import { hasPin, onPinChange, shouldLock } from './lock/lock';
 
 export function App() {
@@ -27,6 +30,8 @@ export function App() {
   const hiddenAt = useRef<number | null>(null);
   // Synchronous cache of "a PIN is set", so re-locking needs no await. null = unknown.
   const pinSet = useRef<boolean | null>(null);
+  // First run: Welcome (sign in / not now) comes before Setup.
+  const [firstRun, setFirstRun] = useState<'welcome' | 'setup'>('welcome');
 
   useEffect(() => {
     let live = true;
@@ -72,8 +77,15 @@ export function App() {
     return <div className="scene app-shell"><Glass role="alert" style={{ borderRadius: 24, padding: 20, color: '#FFFFFF', textAlign: 'center' }}>{t('lock.checkFailed')}</Glass></div>;
   }
   if (!loaded || lockState === 'checking') return <div className="scene app-shell" />;
-  if (route === 'setup' || (needsSetup && route !== 'join')) {
-    return <div className="scene app-shell"><Setup onGo={go} /></div>;
+  if (route === 'join') return <div className="scene app-shell"><Join onGo={go} /></div>;
+  if (route === 'setup' || needsSetup) {
+    return (
+      <div className="scene app-shell">
+        {firstRun === 'welcome'
+          ? <Welcome onSetup={() => setFirstRun('setup')} onDone={() => go('home')} />
+          : <Setup onGo={go} />}
+      </div>
+    );
   }
   if (route === 'add') {
     const editing = getEditing();
@@ -88,12 +100,21 @@ export function App() {
       </div>
     );
   }
+  if (route === 'settings') {
+    // Temporary until the full Settings screen (Task 16 part B): account and sharing only.
+    return (
+      <div className="scene app-shell">
+        <SharePanel />
+        <TabBar current={route} onGo={go} />
+      </div>
+    );
+  }
   return (
     <div className="scene app-shell">
       <Glass className="coming-soon" style={{ borderRadius: 24 }}>
         {route} — {t('app.comingSoon')}
       </Glass>
-      {route !== 'join' && <TabBar current={route} onGo={go} />}
+      <TabBar current={route} onGo={go} />
     </div>
   );
 }

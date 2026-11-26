@@ -12,6 +12,7 @@ import { db } from '../db/db';
 import { getDeviceId } from '../db/device';
 import { listLive, put, softDelete } from '../db/repo';
 import { t, useLanguage } from '../i18n';
+import { currentEmail } from '../sync/auth';
 import { COUNTRY_DEFAULTS, useSettings } from '../settings/store';
 
 type Method = Entry['method'];
@@ -135,6 +136,7 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
     setError(false);
     try {
       await getDeviceId();
+      const createdBy = (await currentEmail()) ?? ''; // read before the transaction
       await db.transaction('rw', [db.suppliers, db.entries, db.payments, db.meta], async () => {
         let sid = supplierId;
         let cat = categoryId;
@@ -152,7 +154,7 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
         const channelCat = incomeCats.find((c) => c.id === channelSel);
         const noteText = note.trim();
         const base = {
-          kind, date, amountIncl: cents, method, createdBy: initial?.createdBy ?? '',
+          kind, date, amountIncl: cents, method, createdBy: initial?.createdBy ?? createdBy,
           ...(initial?.id ? { id: initial.id } : {}),
           ...(noteText ? { note: noteText } : {}),
           ...(initial?.photoId ? { photoId: initial.photoId } : {}),

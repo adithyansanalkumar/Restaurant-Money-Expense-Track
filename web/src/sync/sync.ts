@@ -3,7 +3,7 @@ import type { Table, Transaction } from 'dexie';
 import { db } from '../db/db';
 import { reloadSettings } from '../settings/store';
 import type { Base } from '../domain/types';
-import { AuthNeeded, Offline, currentEmail, getAccessToken } from './auth';
+import { AuthNeeded, Offline, currentEmail, getAccessToken, onAccountChange } from './auth';
 import { ensureFolder, findFile, findFolder, getVersion, listFiles, readJson, writeJson } from './drive';
 import { LEDGER_TABLES, emptyLedger, merge, parseLedger, wins, canonical, type Ledger, type LedgerTable } from './merge';
 
@@ -17,8 +17,13 @@ export interface SyncState {
   revision: number;
   message?: string;
 }
-/** createdHere: this phone created the file (so it re-checks that no older ledger exists). */
-export interface LedgerRef { folderId: string; fileId: string | null; createdHere?: boolean }
+/**
+ * createdHere: this phone created the file (so it re-checks that no older ledger exists).
+ * joined: picked by the user (Join, someone else's ledger). Used as is: never re-checked or replaced.
+ * Only a joined ref may lack folderId (a file picked on its own).
+ */
+export interface LedgerRef { folderId?: string; fileId: string | null; createdHere?: boolean; joined?: boolean }
+type OwnRef = LedgerRef & { folderId: string };
 
 export const FOLDER_NAME = 'Restaurant Accounts';
 export const LEDGER_NAME = 'ledger.json';
@@ -40,12 +45,13 @@ export function useSyncStatus(): SyncState {
 const tbl = (t: LedgerTable) => db[t] as unknown as Table<Base, string>;
 
 /**
- * Where ledger.json lives. Stored ref first; otherwise the "Restaurant Accounts" folder and the
- * ledger.json inside it (fileId null = create it on the first write). Task 16's join flow replaces
- * this lookup by storing a ref picked by the user (setLedgerRef).
+ * Where ledger.json lives. A joined ref (picked in Join) is returned unchanged. Otherwise the stored
+ * ref, or the "Restaurant Accounts" folder and the ledger.json inside it (fileId null = create it
+ * on the first write).
  */
 export async function resolveLedgerRef(): Promise<LedgerRef> {
   const stored = (await db.meta.get('ledgerRef'))?.value as LedgerRef | undefined;
+  if (stored?.joined && stored.fileId) return stored;
   if (stored?.folderId && stored.fileId) return stored;
   const folderId = stored?.folderId ?? await ensureFolder(FOLDER_NAME);
   const found = await findFile(LEDGER_NAME, folderId);
@@ -53,10 +59,36 @@ export async function resolveLedgerRef(): Promise<LedgerRef> {
 }
 
 export async function setLedgerRef(ref: LedgerRef): Promise<void> {
-  const value: LedgerRef = { folderId: ref.folderId, fileId: ref.fileId };
-  if (ref.createdHere) value.createdHere = true;
+  const value: LedgerRef = { fileId: ref.fileId };
+  if (ref.folderId) value.folderId = ref.folderId;
+  if (ref.joined) value.joined = true;
+  else if (ref.createdHere) value.createdHere = true;
   await db.meta.put({ key: 'ledgerRef', value });
 }
+
+// Bumped by resetLedgerState: a sync that started before it must not write its old ref back.
+let generation = 0;
+
+/**
+ * Forget where the ledger is (sign-out, account switch, join): clears meta 'ledgerRef' and
+ * 'lastSync', the pending retry and debounce, and the shown sync time.
+ */
+export async function resetLedgerState(): Promise<void> {
+  resetTimers();
+  await db.meta.bulkDelete(['ledgerRef', 'lastSync']);
+}
+
+function resetTimers(): void {
+  generation++;
+  clearRetry();
+  retryCount = 0;
+  if (timer) clearTimeout(timer);
+  timer = null;
+  setState({ status: 'idle', at: null, message: undefined });
+}
+
+// auth already deleted the meta keys; stop the timers here.
+onAccountChange(() => resetTimers());
 
 /**
  * The canonical ledger is the oldest ledger.json in the oldest "Restaurant Accounts" folder.
@@ -64,7 +96,7 @@ export async function setLedgerRef(ref: LedgerRef): Promise<void> {
  * returns that canonical one if it is a different file
  * (another phone created theirs at the same time and it was not listed yet), else null.
  */
-async function olderLedger(ref: LedgerRef): Promise<LedgerRef | null> {
+async function olderLedger(ref: OwnRef): Promise<LedgerRef | null> {
   const folder = await findFolder(FOLDER_NAME);
   if (folder && folder !== ref.folderId) {
     const f = await findFile(LEDGER_NAME, folder);
@@ -115,14 +147,22 @@ async function applyMerged(merged: Ledger): Promise<Set<LedgerTable>> {
 }
 
 // ---------------- sync ----------------
+class Superseded extends Error {
+  constructor() { super('The ledger changed during sync'); this.name = 'Superseded'; }
+}
+
 async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
+  const gen = generation;
+  // every meta/local write below checks this first: after a reset, the old ledger is not ours any more
+  const live = () => { if (gen !== generation) throw new Superseded(); };
   await getAccessToken(); // fail fast with AuthNeeded / Offline before touching anything
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    live();
     let ref = await resolveLedgerRef();
-    if (ref.fileId && ref.createdHere) {
-      const older = await olderLedger(ref);
+    if (!ref.joined && ref.fileId && ref.createdHere) {
+      const older = await olderLedger(ref as OwnRef);
       // keep createdHere: the re-check is read-only, and listing lag may still hide the true oldest
-      if (older) { ref = { ...older, createdHere: true }; await setLedgerRef(ref); }
+      if (older) { ref = { ...older, createdHere: true }; live(); await setLedgerRef(ref); }
     }
     const local = await readLocal();
     let remote: Ledger | null = null;
@@ -144,17 +184,21 @@ async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
       // immediately before writing: has someone else written since we read?
       if (ref.fileId) {
         if ((await getVersion(ref.fileId)) !== readVersion) continue;
-      } else if (await findFile(LEDGER_NAME, ref.folderId)) {
+      } else if (await findFile(LEDGER_NAME, ref.folderId!)) {
         continue; // the other phone created it meanwhile: merge with theirs instead of making a second one
       }
-      const w = await writeJson(ref.fileId, LEDGER_NAME, ref.folderId, merged);
+      live();
+      // parentId only matters when creating (fileId null), which only happens for our own folder
+      const w = await writeJson(ref.fileId, LEDGER_NAME, ref.folderId ?? '', merged);
       if (!ref.fileId) {
+        const folderId = ref.folderId!;
         // we just created ledger.json: if another phone made one at the same time, the oldest wins
-        const oldest = (await listFiles(LEDGER_NAME, ref.folderId, 2))[0];
+        const oldest = (await listFiles(LEDGER_NAME, folderId, 2))[0];
         if (oldest && oldest.id !== w.id) {
           // keep createdHere so later syncs re-check: with listing lag the other phone may have
           // switched to OUR file, and only re-checking lets both settle on the true oldest
-          await setLedgerRef({ folderId: ref.folderId, fileId: oldest.id, createdHere: true });
+          live();
+          await setLedgerRef({ folderId, fileId: oldest.id, createdHere: true });
           continue; // re-read theirs and merge our rows into it
         }
         ref = { ...ref, createdHere: true };
@@ -162,9 +206,11 @@ async function doSync(): Promise<Omit<SyncResult, 'at'> & { at?: number }> {
       version = w.version;
       fileId = w.id;
     }
+    live();
     await setLedgerRef({ ...ref, fileId });
     const changed = await applyMerged(merged);
     const at = Date.now();
+    live();
     await db.meta.put({ key: 'lastSync', value: { at, version } });
     if (changed.size) {
       setState({ revision: state.revision + 1 });
@@ -186,22 +232,35 @@ export function syncNow(): Promise<SyncResult> {
   setState({ running: true });
   const p = (async (): Promise<SyncResult> => {
     let r: Omit<SyncResult, 'at'> & { at?: number };
+    let superseded = false;
     try {
       r = await doSync();
     } catch (e) {
-      if (isErr(e, AuthNeeded, 'AuthNeeded')) r = { status: 'authNeeded' };
+      if (e instanceof Superseded) { superseded = true; r = { status: 'error', message: e.message }; }
+      else if (isErr(e, AuthNeeded, 'AuthNeeded')) r = { status: 'authNeeded' };
       else if (isErr(e, Offline, 'Offline')) r = { status: 'offline' };
       else r = { status: 'error', message: e instanceof Error ? e.message : String(e) };
     }
-    if (r.status === 'error') console.warn('[sync]', r.message);
     const result: SyncResult = { ...r, at: r.at ?? Date.now() };
     running = null;
+    if (superseded) {
+      // reset while running: leave the reset state (idle, no retry) as it is
+      setState({ running: false });
+      return result;
+    }
+    if (r.status === 'error') console.warn('[sync]', r.message);
     setState({ running: false, status: result.status, at: result.at, message: result.message });
     planRetry(result.status);
     return result;
   })();
   running = p;
   return p;
+}
+
+/** A sync that starts after any running one finished (so it sees a ref stored just now). */
+export async function syncFresh(): Promise<SyncResult> {
+  while (running) await running;
+  return syncNow();
 }
 
 // ---------------- scheduling ----------------

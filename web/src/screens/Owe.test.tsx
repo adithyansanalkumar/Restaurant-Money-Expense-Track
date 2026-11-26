@@ -67,3 +67,13 @@ test('confirm is disabled at 0', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Record a payment' }));
   expect((screen.getByRole('button', { name: 'Confirm payment' }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+test('a recorded payment is stamped with the signed-in email', async () => {
+  await db.meta.put({ key: 'auth', value: { session: 'S', email: 'dad@x.com' } });
+  render(<Owe onGo={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Record a payment' }));
+  tap('4', '0', '0');
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm payment' }));
+  await waitFor(async () => expect(await db.payments.count()).toBe(2));
+  expect((await db.payments.toArray()).every((p) => p.createdBy === 'dad@x.com')).toBe(true);
+});

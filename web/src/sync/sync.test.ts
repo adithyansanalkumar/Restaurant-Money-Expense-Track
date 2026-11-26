@@ -62,7 +62,8 @@ vi.mock('./auth', async (orig) => ({
 }));
 
 import { AuthNeeded, Offline } from './auth';
-import { _pendingSync, _retryDelay, getSyncState, scheduleSync, startSync, stopSync, syncNow } from './sync';
+import { _pendingSync, _retryDelay, getSyncState, resetLedgerState, scheduleSync, startSync, stopSync, syncNow } from './sync';
+import { signOut } from './auth';
 
 const empty = (): Ledger => ({ schema: 1, entries: [], payments: [], suppliers: [], categories: [], settings: [] });
 const entry = (p: Partial<Entry>): Entry => ({
@@ -388,6 +389,48 @@ describe('retries', () => {
     vi.advanceTimersByTime(600_000);
     await vi.waitFor(() => expect(getSyncState().status).toBe('ok'));
     expect(_retryDelay()).toBeNull();
+  });
+
+  it('resetLedgerState (sign-out / account switch / join) clears ledgerRef, lastSync, the retry and the debounce', async () => {
+    currentEmail.mockResolvedValue(null);
+    await startSync();
+    await db.meta.bulkPut([{ key: 'ledgerRef', value: { folderId: 'folder1', fileId: 'ledger1' } }, { key: 'lastSync', value: { at: 1, version: '1' } }]);
+    getAccessToken.mockRejectedValue(new Offline());
+    expect((await syncNow()).status).toBe('offline');
+    expect(_retryDelay()).toBe(30_000);
+    scheduleSync();
+    await resetLedgerState();
+    expect(_retryDelay()).toBeNull();
+    expect(_pendingSync()).toBe(false);
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(await db.meta.get('lastSync')).toBeUndefined();
+    expect(getSyncState().at).toBeNull();
+  });
+
+  it('signOut stops a pending retry (auth notifies sync)', async () => {
+    currentEmail.mockResolvedValue(null);
+    await startSync();
+    getAccessToken.mockRejectedValue(new Offline());
+    await syncNow();
+    expect(_retryDelay()).toBe(30_000);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+    await db.meta.put({ key: 'auth', value: { session: 'S', email: 'a@b.com' } });
+    await signOut();
+    vi.unstubAllGlobals();
+    expect(_retryDelay()).toBeNull();
+  });
+
+  it('a sync in flight across a reset does not write the old ledgerRef back', async () => {
+    let release!: () => void;
+    files.set('ledger1', { version: 1, data: empty() });
+    drive.readJson.mockImplementationOnce(async (id: string) => { await new Promise<void>((r) => { release = r; }); return readImpl(id); });
+    const p = syncNow();
+    await vi.waitFor(() => expect(drive.readJson).toHaveBeenCalled());
+    await resetLedgerState();
+    release();
+    await p;
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(await db.meta.get('lastSync')).toBeUndefined();
   });
 
   it('authNeeded does not retry', async () => {

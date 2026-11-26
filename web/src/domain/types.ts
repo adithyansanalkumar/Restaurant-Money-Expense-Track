@@ -41,4 +41,6 @@ export interface SharedSettings extends Base {
   taxView: 'incl' | 'excl';
   photoBackup: boolean;
   ocrMode: 'device' | 'gemini';
+  /** Google account that created the restaurant (only it can share). Unset when made signed out. */
+  ownerEmail?: string;
 }

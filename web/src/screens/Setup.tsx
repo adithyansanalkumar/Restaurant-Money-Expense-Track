@@ -1,9 +1,10 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Glass } from '../ui/Glass';
 import type { Route } from '../ui/router';
 import { seedDefaults } from '../db/repo';
 import { t, useLanguage, type Lang } from '../i18n';
 import { COUNTRY_DEFAULTS, useSettings } from '../settings/store';
+import { currentEmail } from '../sync/auth';
 
 const label: CSSProperties = { fontSize: 12, fontWeight: 600, color: '#C6D8E6' };
 const select: CSSProperties = { height: 46, borderRadius: 14, padding: '0 10px', font: '600 14px Inter, sans-serif', color: '#FFFFFF' };
@@ -22,6 +23,13 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
   const [taxView, setTaxView] = useState<'incl' | 'excl'>('incl');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void currentEmail().then((e) => { if (live) setEmail(e); }, () => {});
+    return () => { live = false; };
+  }, []);
 
   const pickCountry = (c: string) => {
     setCountry(c);
@@ -37,7 +45,11 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       // Shared settings go last: once that row exists, App stops routing to setup.
       await seedDefaults();
       await saveDevice({ appLanguage: device.appLanguage });
-      await saveShared({ restaurantName: name.trim(), country, currency, billLanguage, taxView, photoBackup: false, ocrMode: 'device' });
+      const owner = await currentEmail();
+      await saveShared({
+        restaurantName: name.trim(), country, currency, billLanguage, taxView, photoBackup: false, ocrMode: 'device',
+        ...(owner ? { ownerEmail: owner } : {}),
+      });
       onGo('home');
     } catch {
       setError(true);
@@ -69,6 +81,7 @@ export function Setup({ onGo }: { onGo: (r: Route) => void }) {
       </Glass>
       <div style={{ fontFamily: "'Inter Tight', sans-serif", fontSize: 28, fontWeight: 800, textAlign: 'center', lineHeight: 1.15 }}>{t('setup.title')}</div>
       <div style={{ fontSize: 14, color: '#C6D8E6', textAlign: 'center', marginTop: -6 }}>{t('setup.subtitle')}</div>
+      {email && <div style={{ fontSize: 13, color: '#DCE8F1', textAlign: 'center' }}>{t('setup.signedInAs', { email })}</div>}
 
       <Glass style={{ alignSelf: 'stretch', borderRadius: 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={col}>

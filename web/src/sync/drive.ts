@@ -112,10 +112,20 @@ export function uploadBlob(name: string, parentId: Id, blob: Blob, mime: string)
   return upload(null, name, parentId, blob, mime);
 }
 
-export async function shareFolder(id: Id, email: string): Promise<void> {
+/** Adds `email` as a writer and lets Google email them. */
+async function shareWith(id: Id, email: string): Promise<void> {
   await driveFetch(`${API}/files/${encodeURIComponent(id)}/permissions?sendNotificationEmail=true`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'user', role: 'writer', emailAddress: email }),
   });
+}
+
+export function shareFolder(id: Id, email: string): Promise<void> {
+  return shareWith(id, email);
+}
+
+/** Same as shareFolder, for a single file (a ledger ref with no folder). */
+export function shareFile(id: Id, email: string): Promise<void> {
+  return shareWith(id, email);
 }

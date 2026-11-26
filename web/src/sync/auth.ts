@@ -6,12 +6,40 @@ export class AuthNeeded extends Error {
 export class Offline extends Error {
   constructor(message = 'Network unavailable') { super(message); this.name = 'Offline'; }
 }
+/** Google still gave no refresh token after the one consent retry. */
+export class ConsentRequired extends Error {
+  constructor(message = 'Access was not approved') { super(message); this.name = 'ConsentRequired'; }
+}
+/** signIn({ expectEmail }) got a different Google account; nothing was stored. */
+export class EmailMismatch extends Error {
+  constructor(public email: string) { super('Signed in with a different account'); this.name = 'EmailMismatch'; }
+}
+
+export interface SignInOptions {
+  /** Called when Google must be asked for consent again (the app shows "Please approve access again"). */
+  onConsentRetry?: () => void;
+  /** Only accept this account (Forgot PIN). A different one is revoked and EmailMismatch thrown. */
+  expectEmail?: string;
+}
 
 const GIS_URL = 'https://accounts.google.com/gsi/client';
 const SCOPE = 'openid email https://www.googleapis.com/auth/drive.file';
 const EXPIRY_MARGIN_MS = 60_000;
 
 interface StoredAuth { session: string; email: string }
+/** meta 'account': the last signed-in account, kept after its session expires, so a switch is detected. */
+interface StoredAccount { email: string }
+
+const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// Sign-out and account switches: the ledger location and last-sync are dropped (here, in IndexedDB),
+// and listeners (sync) stop their timers.
+const accountListeners = new Set<() => void>();
+export function onAccountChange(cb: () => void): () => void {
+  accountListeners.add(cb);
+  return () => { accountListeners.delete(cb); };
+}
+const notifyAccountChange = () => accountListeners.forEach((l) => { try { l(); } catch { /* listener bug */ } });
 let cached: { token: string; expiresAt: number } | null = null;
 // Bumped on signIn/signOut so a refresh that was in flight across them is dropped.
 let epoch = 0;
@@ -55,13 +83,8 @@ async function post(path: string, body: unknown): Promise<Response> {
   }
 }
 
-export async function signIn(): Promise<{ email: string }> {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-  if (!clientId || !authUrl()) {
-    throw new Error('Sign-in is not configured: set VITE_GOOGLE_CLIENT_ID and VITE_AUTH_URL');
-  }
-  await loadGis();
-  const code = await new Promise<string>((resolve, reject) => {
+function requestCode(clientId: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const client = (window as any).google.accounts.oauth2.initCodeClient({
       client_id: clientId,
       scope: SCOPE,
@@ -72,13 +95,44 @@ export async function signIn(): Promise<{ email: string }> {
     });
     client.requestCode();
   });
-  const res = await post('/exchange', { code });
+}
+
+async function revokeSession(session: string): Promise<void> {
+  try { await post('/revoke', { session }); } catch { /* best effort */ }
+}
+
+export async function signIn(opts: SignInOptions = {}): Promise<{ email: string }> {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  if (!clientId || !authUrl()) {
+    throw new Error('Sign-in is not configured: set VITE_GOOGLE_CLIENT_ID and VITE_AUTH_URL');
+  }
+  await loadGis();
+  let res = await post('/exchange', { code: await requestCode(clientId) });
+  if (res.status === 409) {
+    // The worker revoked the grant (Google sent no refresh token); Google asks for consent again.
+    opts.onConsentRetry?.();
+    res = await post('/exchange', { code: await requestCode(clientId) });
+    if (res.status === 409) throw new ConsentRequired();
+  }
   if (!res.ok) throw new Error('Sign-in failed');
   const d = await res.json() as { session: string; accessToken: string; expiresIn: number; email: string };
+  if (opts.expectEmail && !sameEmail(d.email, opts.expectEmail)) {
+    await revokeSession(d.session);
+    throw new EmailMismatch(d.email);
+  }
   epoch++;
   refreshing = null;
-  await db.meta.put({ key: 'auth', value: { session: d.session, email: d.email } satisfies StoredAuth });
+  const old = await readAuth();
+  if (old && old.session !== d.session) await revokeSession(old.session);
+  const last = (await db.meta.get('account'))?.value as StoredAccount | undefined;
+  const switched = !!last && !sameEmail(last.email, d.email);
+  await db.transaction('rw', db.meta, async () => {
+    if (switched) await db.meta.bulkDelete(['ledgerRef', 'lastSync']);
+    await db.meta.put({ key: 'auth', value: { session: d.session, email: d.email } satisfies StoredAuth });
+    await db.meta.put({ key: 'account', value: { email: d.email } satisfies StoredAccount });
+  });
   cached = { token: d.accessToken, expiresAt: Date.now() + d.expiresIn * 1000 };
+  if (switched) notifyAccountChange();
   return { email: d.email };
 }
 
@@ -126,8 +180,7 @@ export async function signOut(): Promise<void> {
   refreshing = null;
   cached = null;
   const auth = await readAuth();
-  if (auth) {
-    try { await post('/revoke', { session: auth.session }); } catch { /* best effort */ }
-  }
-  await db.meta.delete('auth');
+  if (auth) await revokeSession(auth.session);
+  await db.meta.bulkDelete(['auth', 'account', 'ledgerRef', 'lastSync']);
+  notifyAccountChange();
 }

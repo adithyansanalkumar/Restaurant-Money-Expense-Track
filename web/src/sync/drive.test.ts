@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const getAccessToken = vi.fn();
 vi.mock('./auth', async (orig) => ({ ...(await orig<typeof import('./auth')>()), getAccessToken: (force?: boolean) => getAccessToken(force) }));
 
-import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, getVersion } from './drive';
+import { ensureFolder, findFile, findFolder, listFiles, readJson, writeJson, uploadBlob, shareFolder, shareFile, getVersion } from './drive';
 import { Offline } from './auth';
 
 const fetchMock = vi.fn();
@@ -128,6 +128,14 @@ describe('readJson / uploadBlob / shareFolder', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain('/drive/v3/files/fid/permissions');
     expect(url).toContain('sendNotificationEmail=true');
+    expect(JSON.parse(init.body)).toEqual({ type: 'user', role: 'writer', emailAddress: 'a@b.com' });
+  });
+  it('shareFile uses the same permissions endpoint on the file', async () => {
+    fetchMock.mockResolvedValueOnce(json({ id: 'perm' }));
+    await shareFile('led1', 'a@b.com');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/drive/v3/files/led1/permissions?sendNotificationEmail=true');
+    expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ type: 'user', role: 'writer', emailAddress: 'a@b.com' });
   });
 });

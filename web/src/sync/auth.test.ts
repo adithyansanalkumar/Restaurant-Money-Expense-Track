@@ -5,7 +5,7 @@ import { db } from '../db/db';
 vi.stubEnv('VITE_AUTH_URL', 'https://auth.test');
 vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'cid');
 
-import { getAccessToken, signOut, signIn, currentEmail, AuthNeeded, Offline } from './auth';
+import { getAccessToken, signOut, signIn, currentEmail, onAccountChange, AuthNeeded, Offline, ConsentRequired, EmailMismatch } from './auth';
 
 const fetchMock = vi.fn();
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
@@ -127,5 +127,101 @@ describe('signOut', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://auth.test/revoke');
     expect(await db.meta.get('auth')).toBeUndefined();
     expect(await currentEmail()).toBeNull();
+  });
+});
+
+describe('sign-in hardening', () => {
+  let codes: string[];
+  let requests: number;
+  beforeEach(() => {
+    codes = ['C1', 'C2', 'C3'];
+    requests = 0;
+    let cb: (r: { code?: string }) => void = () => {};
+    (window as any).google = { accounts: { oauth2: { initCodeClient: (cfg: any) => { cb = cfg.callback; return { requestCode: () => { requests++; cb({ code: codes.shift() }); } }; } } } };
+  });
+  const ok = (session: string, email: string) => json({ session, accessToken: 'AT-' + session, expiresIn: 3600, email });
+
+  it('409 consent_required: tells the caller, re-runs the code flow once and succeeds', async () => {
+    const onConsentRetry = vi.fn();
+    fetchMock.mockResolvedValueOnce(json({ error: 'consent_required' }, 409)).mockResolvedValueOnce(ok('S1', 'a@b.com'));
+    expect(await signIn({ onConsentRetry })).toEqual({ email: 'a@b.com' });
+    expect(onConsentRetry).toHaveBeenCalledTimes(1);
+    expect(requests).toBe(2);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ code: 'C2' });
+    expect((await db.meta.get('auth'))?.value).toEqual({ session: 'S1', email: 'a@b.com' });
+  });
+
+  it('a second 409 throws ConsentRequired and stores nothing', async () => {
+    fetchMock.mockResolvedValue(json({ error: 'consent_required' }, 409));
+    await expect(signIn()).rejects.toBeInstanceOf(ConsentRequired);
+    expect(requests).toBe(2);
+    expect(await db.meta.get('auth')).toBeUndefined();
+  });
+
+  it('re-sign-in revokes the old session before storing the new one', async () => {
+    await db.meta.put({ key: 'auth', value: { session: 'OLD', email: 'a@b.com' } });
+    fetchMock.mockResolvedValueOnce(ok('NEW', 'a@b.com')).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await signIn();
+    expect(fetchMock.mock.calls[1][0]).toBe('https://auth.test/revoke');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ session: 'OLD' });
+    expect((await db.meta.get('auth'))?.value).toEqual({ session: 'NEW', email: 'a@b.com' });
+  });
+
+  it('same account again keeps ledgerRef and lastSync', async () => {
+    await db.meta.bulkPut([
+      { key: 'auth', value: { session: 'OLD', email: 'a@b.com' } }, { key: 'account', value: { email: 'a@b.com' } },
+      { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }, { key: 'lastSync', value: { at: 1, version: '1' } },
+    ]);
+    const changed = vi.fn();
+    const off = onAccountChange(changed);
+    fetchMock.mockResolvedValueOnce(ok('NEW', 'A@b.com')).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await signIn();
+    off();
+    expect(await db.meta.get('ledgerRef')).toBeDefined();
+    expect(await db.meta.get('lastSync')).toBeDefined();
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('a different account clears ledgerRef and lastSync and notifies (even after the old session expired)', async () => {
+    await db.meta.bulkPut([
+      { key: 'account', value: { email: 'a@b.com' } },
+      { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }, { key: 'lastSync', value: { at: 1, version: '1' } },
+    ]);
+    const changed = vi.fn();
+    const off = onAccountChange(changed);
+    fetchMock.mockResolvedValueOnce(ok('S2', 'c@d.com'));
+    await signIn();
+    off();
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(await db.meta.get('lastSync')).toBeUndefined();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(await currentEmail()).toBe('c@d.com');
+  });
+
+  it('expectEmail mismatch revokes the new session, keeps the old one and throws EmailMismatch', async () => {
+    await db.meta.put({ key: 'auth', value: { session: 'OLD', email: 'a@b.com' } });
+    await db.meta.put({ key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } });
+    fetchMock.mockResolvedValueOnce(ok('WRONG', 'x@y.com')).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const err = await signIn({ expectEmail: 'a@b.com' }).catch((e) => e);
+    expect(err).toBeInstanceOf(EmailMismatch);
+    expect(err.email).toBe('x@y.com');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ session: 'WRONG' });
+    expect((await db.meta.get('auth'))?.value).toEqual({ session: 'OLD', email: 'a@b.com' });
+    expect(await db.meta.get('ledgerRef')).toBeDefined();
+  });
+
+  it('signOut clears ledgerRef and lastSync and notifies', async () => {
+    await db.meta.bulkPut([
+      { key: 'auth', value: { session: 'S', email: 'a@b.com' } },
+      { key: 'ledgerRef', value: { folderId: 'F', fileId: 'L' } }, { key: 'lastSync', value: { at: 1, version: '1' } },
+    ]);
+    const changed = vi.fn();
+    const off = onAccountChange(changed);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await signOut();
+    off();
+    expect(await db.meta.get('ledgerRef')).toBeUndefined();
+    expect(await db.meta.get('lastSync')).toBeUndefined();
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 });

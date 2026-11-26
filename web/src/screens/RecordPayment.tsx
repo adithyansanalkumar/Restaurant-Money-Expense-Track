@@ -11,6 +11,7 @@ import { db } from '../db/db';
 import { getDeviceId } from '../db/device';
 import { put } from '../db/repo';
 import { t, useLanguage } from '../i18n';
+import { currentEmail } from '../sync/auth';
 import { currencyParts } from './AddEntry';
 
 type Method = Payment['method'];
@@ -50,7 +51,7 @@ export function RecordPayment({ supplier, entries, payments, onDone, onCancel }:
     if (busy || cents <= 0) return;
     setBusy(true); setFailed(false);
     try {
-      const res = allocatePayment(supplier.id, cents, date, method, entries, payments);
+      const res = allocatePayment(supplier.id, cents, date, method, entries, payments, (await currentEmail()) ?? '');
       if (!Array.isArray(res)) {
         if (res.error === 'tooMuch') setTooMuch(res.owed);
         return;

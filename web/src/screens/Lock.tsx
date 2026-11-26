@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Glass } from '../ui/Glass';
 import { t, useLanguage } from '../i18n';
-import { biometricEnabled, checkPin, lockoutRemainingMs, unlockBiometric } from '../lock/lock';
+import { biometricEnabled, checkPin, clearPin, lockoutRemainingMs, unlockBiometric } from '../lock/lock';
 import { PinPad, primaryBtn } from '../lock/PinPad';
+import { currentEmail } from '../sync/auth';
+import { useSignIn } from '../ui/useSignIn';
+import { errorText, linkBtn, noticeText } from '../ui/styles';
+
+const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function Lock({ onUnlock }: { onUnlock: () => void }) {
   useLanguage();
@@ -11,13 +16,34 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
   const [remaining, setRemaining] = useState<number | null>(null);
   const [bio, setBio] = useState(false);
   const [busy, setBusy] = useState(false);
+  // "Forgot PIN?" only when this phone has a Google session to prove who you are.
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const { run: runSignIn, busy: signingIn, notice } = useSignIn();
 
   useEffect(() => {
     let live = true;
     void lockoutRemainingMs().then((ms) => { if (live) setRemaining(ms); });
     void biometricEnabled().then((b) => { if (live) setBio(b); });
+    void currentEmail().then((e) => { if (live) setAuthEmail(e); }, () => {});
     return () => { live = false; };
   }, []);
+
+  const forgot = async () => {
+    if (!authEmail || signingIn) return;
+    setForgotError(null);
+    try {
+      // expectEmail: a different account is refused without replacing this phone's session
+      const r = await runSignIn({ expectEmail: authEmail });
+      if (!sameEmail(r.email, authEmail)) throw Object.assign(new Error('mismatch'), { name: 'EmailMismatch' });
+      await clearPin();
+      onUnlock();
+    } catch (e) {
+      setForgotError((e as Error | undefined)?.name === 'EmailMismatch'
+        ? t('lock.forgotMismatch', { email: authEmail })
+        : t('lock.forgotError'));
+    }
+  };
 
   useEffect(() => {
     if ((remaining ?? 0) <= 0) return;
@@ -61,6 +87,11 @@ export function Lock({ onUnlock }: { onUnlock: () => void }) {
             ? <div role="alert" style={{ fontSize: 13, color: '#FF8E8E', textAlign: 'center' }}>{t('lock.locked', { s: Math.ceil((remaining ?? 0) / 1000) })}</div>
             : wrong && <div role="alert" style={{ fontSize: 13, color: '#FF8E8E' }}>{t('lock.wrong')}</div>}
           <button type="button" style={primaryBtn} disabled={!ready || locked || busy || pin.length < 4} onClick={() => void submit()}>{t('lock.unlock')}</button>
+          {authEmail && (
+            <button type="button" style={linkBtn} disabled={signingIn} onClick={() => void forgot()}>{t('lock.forgot')}</button>
+          )}
+          {notice && <div role="status" style={noticeText}>{notice}</div>}
+          {forgotError && <div role="alert" style={errorText}>{forgotError}</div>}
         </Glass>
       </div>
     </div>
