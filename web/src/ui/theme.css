@@ -50,3 +50,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Big amount field: the "0" placeholder keeps the amount colour, just dimmer */
 [data-testid="amount"] input::placeholder { color: inherit; opacity: 0.45; }
+
+/* Settings list rows: no hairline under the last row of a group. */
+.settings-row:last-child > :last-child { border-bottom: 0 !important; }

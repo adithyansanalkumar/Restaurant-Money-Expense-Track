@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-export interface SegOption<V extends string> { value: V; label: string; activeBg?: string; activeColor?: string }
+export interface SegOption<V extends string> { value: V; label: string; ariaLabel?: string; activeBg?: string; activeColor?: string }
 
 export function Segmented<V extends string>({ options, value, onChange, label, glass = false, small = false }: {
   options: SegOption<V>[]; value: V; onChange: (v: V) => void; label: string; glass?: boolean; small?: boolean;
@@ -13,7 +13,7 @@ export function Segmented<V extends string>({ options, value, onChange, label, g
       {options.map((o) => {
         const on = o.value === value;
         return (
-          <button key={o.value} type="button" aria-pressed={on} onClick={() => onChange(o.value)} style={{
+          <button key={o.value} type="button" aria-pressed={on} aria-label={o.ariaLabel} onClick={() => onChange(o.value)} style={{
             minHeight: 44, padding: '0 14px', border: 0, borderRadius: small ? 11 : 18,
             background: on ? (o.activeBg ?? '#FFFFFF') : 'transparent',
             font: `${on ? 700 : 500} ${small ? 12 : 13}px Inter, sans-serif`,

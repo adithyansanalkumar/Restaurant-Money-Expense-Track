@@ -63,7 +63,7 @@ test('first run, add an expense, see it on Home, export to Excel', async ({ page
 
   // Settings screenshot
   await page.getByRole('link', { name: 'Settings' }).click();
-  await expect(page.getByText('Restaurant', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/settings.png`, fullPage: true });
 
   // Reports -> export
