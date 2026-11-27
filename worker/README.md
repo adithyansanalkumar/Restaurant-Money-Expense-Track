@@ -9,7 +9,7 @@ and one entry per phone session (`s:<sha256(session)>` → the account). Both ar
 
 ## Deploy
 
-Run from `resto-app/worker/`. Needs a free Cloudflare account and a Google OAuth *Web* client
+Run from the `worker/` folder. Needs a free Cloudflare account and a Google OAuth *Web* client
 (authorised JavaScript origins = your app origin; no redirect URI needed for the popup flow).
 
 ```sh
@@ -33,7 +33,7 @@ npx wrangler deploy
 ```
 
 Wrangler prints the worker URL (`https://resto-auth.<you>.workers.dev`). Put it in the web app as
-`VITE_AUTH_URL` (see `resto-app/web/.env.example`).
+`VITE_AUTH_URL` (see `web/.env.example`).
 
 `ENC_KEY` must be base64 of exactly 32 bytes (the `openssl` command above); any other length makes
 every request fail with `500 server_error`.

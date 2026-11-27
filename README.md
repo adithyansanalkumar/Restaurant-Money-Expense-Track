@@ -53,7 +53,7 @@ Each one is marked **[COPY]** where you get it and **[PASTE]** where it goes.
 ### Step 3. Publish the sign-in worker
 
 Needs Node.js on the computer (https://nodejs.org, the "LTS" download). Open a terminal in the
-`resto-app/worker` folder and follow the commands in [`worker/README.md`](worker/README.md). In short:
+`worker` folder and follow the commands in [`worker/README.md`](worker/README.md). In short:
 
 1. `npm install`, then `npx wrangler login` (a browser window opens; allow it).
 2. `npx wrangler kv namespace create TOKENS`, then paste the printed `id` into `wrangler.toml`.
@@ -71,7 +71,7 @@ Needs Node.js on the computer (https://nodejs.org, the "LTS" download). Open a t
 1. Cloudflare dashboard, **Workers & Pages**, **Create**, **Pages**, **Connect to Git**, choose this
    GitHub repository (allow Cloudflare to read it).
 2. Build settings:
-   - Root directory: `resto-app/web`
+   - Root directory: `web`
    - Build command: `npm run build`
    - Build output directory: `dist`
 3. **Environment variables** (Settings, Variables), **[PASTE]** the four values you collected:
@@ -196,7 +196,7 @@ Open the Pages URL in the phone's browser.
 ## For developers
 
 ```sh
-cd resto-app/web
+cd web
 npm install
 npm test                 # unit tests (vitest)
 npm run build            # type-check + production build into dist/
@@ -213,6 +213,6 @@ npm install && npm test  # worker tests; see worker/README.md to deploy
 - `web/e2e/` Playwright smoke test (screenshots go to `e2e/screenshots/`, git-ignored). The first run needs a
   Chromium installed for Playwright (`npx playwright install chromium`).
 - `worker/` the Cloudflare sign-in helper.
-- Design: [`../drafts/restaurant-money-app-design.md`](../drafts/restaurant-money-app-design.md).
-  Plan: [`../drafts/restaurant-money-app-plan.md`](../drafts/restaurant-money-app-plan.md).
+- Design: [`docs/design.md`](docs/design.md).
+  Plan: [`docs/plan.md`](docs/plan.md).
 - Environment variables for local runs: copy `web/.env.example` to `web/.env` and fill the four `VITE_` values.
