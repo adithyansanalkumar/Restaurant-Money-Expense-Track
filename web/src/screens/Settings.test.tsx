@@ -49,12 +49,14 @@ beforeEach(async () => {
 });
 
 const shared = async () => (await db.settings.get('shared'))!;
+/** Opens a Settings sub-page (or goes back) by its row's name. */
+const open = async (name: string) => fireEvent.click(await screen.findByRole('button', { name }));
+const back = () => open('Back');
 
 test('restaurant card: name, signed-in email, Owner role, and Sync now', async () => {
   render(<Settings onGo={vi.fn()} />);
-  expect(await screen.findByDisplayValue('Chez Adi')).toBeTruthy();
-  expect((await screen.findAllByText(/adi@x\.com/)).length).toBeGreaterThan(0);
-  expect(screen.getByText('Owner')).toBeTruthy();
+  expect(await screen.findByText('Chez Adi')).toBeTruthy();
+  expect(await screen.findByText('adi@x.com · Owner')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
   expect(sync.syncNow).toHaveBeenCalled();
 });
@@ -63,12 +65,14 @@ test('tax view and bill language are shared settings and are saved', async () =>
   render(<Settings onGo={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Excl. tax' }));
   await waitFor(async () => expect((await shared()).taxView).toBe('excl'));
+  await open('Languages');
   fireEvent.click(screen.getByRole('button', { name: 'English' }));
   await waitFor(async () => expect((await shared()).billLanguage).toBe('eng'));
 });
 
 test('country change sets its currency; the owner can edit it', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Country & currency');
   fireEvent.change(await screen.findByLabelText('Country'), { target: { value: 'GB' } });
   await waitFor(async () => { const s = await shared(); expect([s.country, s.currency]).toEqual(['GB', 'GBP']); });
   fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'USD' } });
@@ -78,20 +82,25 @@ test('country change sets its currency; the owner can edit it', async () => {
 test('a joined user (not the owner) may change country and currency too; only sharing is owner-only (M10)', async () => {
   auth.email = 'son@x.com';
   render(<Settings onGo={vi.fn()} />);
-  await waitFor(() => expect(screen.getByText('Shared')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText('son@x.com · Shared')).toBeTruthy());
+  await open('Country & currency');
   fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'GB' } });
   await waitFor(async () => expect(await shared()).toMatchObject({ country: 'GB', currency: 'GBP' }));
   fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'EUR' } });
   await waitFor(async () => expect((await shared()).currency).toBe('EUR'));
-  fireEvent.click(screen.getByRole('button', { name: 'Excl. tax' }));
+  await back();
+  fireEvent.click(await screen.findByRole('button', { name: 'Excl. tax' }));
   await waitFor(async () => expect((await shared()).taxView).toBe('excl'));
   expect(screen.queryByText('Share with someone')).toBeNull();
 });
 
 test('app language and first day of week are device settings', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Country & currency');
   fireEvent.click(await screen.findByRole('button', { name: 'Sunday' }));
   await waitFor(async () => expect(((await db.meta.get('device'))!.value as any).weekStart).toBe(0));
+  await back();
+  await open('Languages');
   fireEvent.change(screen.getByLabelText('App language'), { target: { value: 'fr' } });
   await waitFor(async () => expect(((await db.meta.get('device'))!.value as any).appLanguage).toBe('fr'));
   expect((await shared()).updatedAt).toBeDefined();
@@ -111,6 +120,7 @@ test('while adoptPending nothing shared is written and a pending notice shows', 
 
 test('categories: add, rename, archive and unarchive write through put', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Categories & suppliers');
   fireEvent.change(await screen.findByLabelText('New category name'), { target: { value: 'Spices' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
   await waitFor(async () => expect((await db.categories.toArray()).some((c) => c.name === 'Spices' && c.kind === 'expense' && !c.archived)).toBe(true));
@@ -130,6 +140,7 @@ test('categories: add, rename, archive and unarchive write through put', async (
 
 test('income channels are edited the same way', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Categories & suppliers');
   fireEvent.change(await screen.findByLabelText('New channel name'), { target: { value: 'Events' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
   await waitFor(async () => expect((await db.categories.toArray()).some((c) => c.name === 'Events' && c.kind === 'income')).toBe(true));
@@ -138,6 +149,7 @@ test('income channels are edited the same way', async () => {
 test('suppliers: add, rename and set a default category', async () => {
   const dairy = (await db.categories.toArray()).find((c) => c.name === 'Dairy')!;
   render(<Settings onGo={vi.fn()} />);
+  await open('Categories & suppliers');
   fireEvent.change(await screen.findByLabelText('New supplier name'), { target: { value: 'Metro' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add supplier' }));
   await waitFor(async () => expect((await db.suppliers.toArray()).map((s) => s.name)).toEqual(['Metro']));
@@ -156,6 +168,7 @@ test('suppliers: add, rename and set a default category', async () => {
 test('sharing (owner): lists who was invited, invites by email and records it in shared settings', async () => {
   await saveShared({ sharedWith: ['old@x.com'] });
   render(<Settings onGo={vi.fn()} />);
+  await open('Shared with');
   expect(await screen.findByText('old@x.com')).toBeTruthy();
   const input = screen.getByLabelText('Email address');
   fireEvent.change(input, { target: { value: 'nope' } });
@@ -185,6 +198,7 @@ test('photo backup toggle is a shared setting; turning it on runs the backup', a
 
 test('app lock: set a PIN, then change/remove and the biometric switch appear; remove asks first', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('App lock');
   expect(screen.queryByRole('switch', { name: /Face ID/ })).toBeNull();
   fireEvent.click(await screen.findByRole('button', { name: 'Set a PIN' }));
   for (const d of ['1', '2', '3', '4']) fireEvent.click(screen.getByRole('button', { name: d }));
@@ -211,6 +225,7 @@ test('biometric not available on this phone: says so and stays off', async () =>
   await setPin('1234', 1000);
   bio.enable.mockResolvedValue(false);
   render(<Settings onGo={vi.fn()} />);
+  await open('App lock');
   fireEvent.click(await screen.findByRole('switch', { name: /Face ID/ }));
   expect(await screen.findByText(/isn’t available/)).toBeTruthy();
   expect(screen.getByRole('switch', { name: /Face ID/ }).getAttribute('aria-checked')).toBe('false');
@@ -218,6 +233,7 @@ test('biometric not available on this phone: says so and stays off', async () =>
 
 test('bill reading offers only "On this phone" for now', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Bill reading');
   expect(await screen.findByText('On this phone')).toBeTruthy();
 });
 
@@ -226,18 +242,21 @@ test('Export to Excel goes to Reports; Open a shared restaurant goes to join', a
   render(<Settings onGo={go} />);
   fireEvent.click(await screen.findByRole('button', { name: /Export to Excel/ }));
   expect(go).toHaveBeenCalledWith('reports');
+  await open('Restaurant & account');
   fireEvent.click(screen.getByRole('button', { name: 'Open a shared restaurant' }));
   expect(go).toHaveBeenCalledWith('join');
 });
 
 test('Sign out calls signOut', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
   await waitFor(() => expect(auth.signOut).toHaveBeenCalled());
 });
 
 test('Disconnect Google asks first, explaining it signs out every phone', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   fireEvent.click(await screen.findByRole('button', { name: 'Disconnect Google completely' }));
   expect(screen.getByText(/signs out every phone/)).toBeTruthy();
   expect(auth.disconnect).not.toHaveBeenCalled();
@@ -253,8 +272,11 @@ test('signed out: Sign in with Google runs signInLater (adoption decides)', asyn
   auth.signIn.mockImplementation(async () => { auth.email = 'adi@x.com'; return { email: 'adi@x.com' }; });
   adopt.mockResolvedValue('none');
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
   await waitFor(() => expect(adopt).toHaveBeenCalled());
+  await back();
+  await open('Shared with');
   expect(await screen.findByText('Share with someone')).toBeTruthy();
 });
 
@@ -265,12 +287,14 @@ test('signed out former joiner: sign-in that ends in needsJoin sends the user to
   adopt.mockResolvedValue('needsJoin');
   const go = vi.fn();
   render(<Settings onGo={go} />);
+  await open('Restaurant & account');
   fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Google' }));
   await waitFor(() => expect(go).toHaveBeenCalledWith('join'));
 });
 
 test('owner and joined user can both rename the restaurant (shared setting, M10)', async () => {
   const { unmount } = render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   const input = await screen.findByLabelText('Restaurant name');
   fireEvent.change(input, { target: { value: 'Chez Dad' } });
   fireEvent.blur(input);
@@ -278,6 +302,7 @@ test('owner and joined user can both rename the restaurant (shared setting, M10)
   unmount();
   auth.email = 'son@x.com';
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   const again = await screen.findByLabelText('Restaurant name');
   fireEvent.change(again, { target: { value: 'Chez Papa' } });
   fireEvent.blur(again);
@@ -286,6 +311,7 @@ test('owner and joined user can both rename the restaurant (shared setting, M10)
 
 test('an empty restaurant name is not saved; the old one comes back', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   const input = await screen.findByLabelText('Restaurant name');
   const before = await shared();
   fireEvent.change(input, { target: { value: '   ' } });
@@ -297,6 +323,7 @@ test('an empty restaurant name is not saved; the old one comes back', async () =
 test('name is not editable while adoptPending', async () => {
   await db.meta.put({ key: 'adoptPending', value: true });
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   expect((await screen.findByLabelText('Restaurant name') as HTMLInputElement).disabled).toBe(true);
 });
 
@@ -304,14 +331,20 @@ test('a purely local phone (signed out, no ledgerRef) can edit name and region e
   auth.email = null;
   await db.meta.delete('ledgerRef');
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   expect(await screen.findByLabelText('Restaurant name')).toBeTruthy();
+  await back();
+  await open('Country & currency');
   expect(screen.getByLabelText('Country')).toBeTruthy();
 });
 
 test('signed out with a ledgerRef: shared settings stay editable (equal rights, synced later)', async () => {
   auth.email = null;
   render(<Settings onGo={vi.fn()} />);
+  await open('Restaurant & account');
   expect(await screen.findByLabelText('Restaurant name')).toBeTruthy();
+  await back();
+  await open('Country & currency');
   expect(screen.getByLabelText('Country')).toBeTruthy();
 });
 
@@ -320,15 +353,18 @@ test('while adoptPending the region and tax view are not written (M10)', async (
   await db.meta.put({ key: 'adoptPending', value: true });
   const before = await shared();
   render(<Settings onGo={vi.fn()} />);
+  await open('Country & currency');
   const country = await screen.findByLabelText('Country');
   expect(country).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Excl. tax' }));
+  await back();
+  fireEvent.click(await screen.findByRole('button', { name: 'Excl. tax' }));
   await new Promise((r) => setTimeout(r, 30));
   expect(await shared()).toEqual(before);
 });
 
 test('bill reading: Google AI choice writes ocrMode, reveals the key field; key stays on the device', async () => {
   render(<Settings onGo={vi.fn()} />);
+  await open('Bill reading');
   expect(await screen.findByRole('radio', { name: 'On this phone' })).toBeChecked();
   expect(screen.queryByLabelText('Google AI key')).toBeNull();
   fireEvent.click(screen.getByRole('radio', { name: /Google AI/ }));
@@ -348,6 +384,7 @@ test('bill reading mode is not written while adoptPending', async () => {
   await db.meta.put({ key: 'adoptPending', value: true });
   const before = await shared();
   render(<Settings onGo={vi.fn()} />);
+  await open('Bill reading');
   fireEvent.click(await screen.findByRole('radio', { name: /Google AI/ }));
   await new Promise((r) => setTimeout(r, 30));
   expect(await shared()).toEqual(before);
@@ -356,6 +393,7 @@ test('bill reading mode is not written while adoptPending', async () => {
 test('the Google AI key is saved when the screen goes away right after typing (M2)', async () => {
   await saveShared({ ocrMode: 'gemini' });
   const { unmount } = render(<Settings onGo={vi.fn()} />);
+  await open('Bill reading');
   const key = await screen.findByLabelText('Google AI key');
   await waitFor(async () => expect(await db.meta.get('geminiKey')).toBeUndefined());
   fireEvent.change(key, { target: { value: 'AIzaUNMOUNT' } });
