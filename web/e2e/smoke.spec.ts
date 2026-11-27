@@ -35,9 +35,11 @@ test('first run, add an expense, see it on Home, export to Excel', async ({ page
   await expect(page.getByText('Today out')).toBeVisible();
   await page.getByRole('link', { name: 'Add' }).click();
 
-  // Keypad 1 8 4 , 5 0
-  for (const k of ['1', '8', '4', ',', '5', '0']) await page.getByRole('button', { name: k, exact: true }).click();
-  await expect(page.getByTestId('amount')).toContainText('184,50');
+  // tapping the amount opens the phone's number keyboard; type into it
+  const amount = page.getByRole('textbox', { name: /^Amount/ }).first();
+  await amount.click();
+  await amount.pressSequentially('184,50');
+  await expect(amount).toHaveValue('184,50');
 
   // Create a supplier
   await page.getByRole('button', { name: '+ New' }).click();

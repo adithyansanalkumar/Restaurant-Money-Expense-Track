@@ -45,7 +45,6 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'add.expense': 'Dépense',
   'add.collection': 'Encaissement',
   'add.scan': 'Scanner une facture',
-  'add.deleteDigit': 'Effacer un chiffre',
   'add.amountIncl': 'Montant · TTC',
   'add.amount': 'Montant',
   'add.newSupplier': '+ Nouveau',

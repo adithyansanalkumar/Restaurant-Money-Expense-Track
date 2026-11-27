@@ -21,7 +21,8 @@ beforeEach(async () => {
   window.location.hash = '';
 });
 
-const tap = (...keys: string[]) => keys.forEach((k) => fireEvent.click(screen.getByRole('button', { name: k })));
+const amountBox = () => screen.getAllByRole('textbox', { name: /^Amount( · incl\. tax)?$/ }).at(-1) as HTMLInputElement;
+const tap = (...keys: string[]) => { const el = amountBox(); fireEvent.change(el, { target: { value: el.value + keys.join('') } }); };
 
 test('shows total owed and the three buckets', async () => {
   render(<Owe onGo={vi.fn()} />);

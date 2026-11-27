@@ -17,7 +17,8 @@ beforeEach(async () => {
   window.location.hash = '';
 });
 
-const tap = (...keys: string[]) => keys.forEach((k) => fireEvent.click(screen.getByRole('button', { name: k })));
+const amountBox = () => screen.getAllByRole('textbox', { name: /^Amount( · incl\. tax)?$/ }).at(-1) as HTMLInputElement;
+const tap = (...keys: string[]) => { const el = amountBox(); fireEvent.change(el, { target: { value: el.value + keys.join('') } }); };
 
 test('expense: typed 184,5 with Metro saves 18450, default category, paid, one payment', async () => {
   const go = vi.fn();
@@ -95,7 +96,8 @@ test('new supplier with a category gets that category as default', async () => {
 test('close routes home; scan routes bills; initial pre-fills amount', async () => {
   const go = vi.fn();
   render(<AddEntry onGo={go} initial={{ amountIncl: 12345 }} />);
-  expect(await screen.findByText(/123,45/)).toBeTruthy();
+  await waitFor(() => expect(amountBox().value).toBe('123,45'));
+  expect(amountBox().getAttribute('inputmode')).toBe('decimal');
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   expect(go).toHaveBeenCalledWith('home');
   fireEvent.click(screen.getByRole('button', { name: 'Scan a bill' }));
@@ -243,7 +245,7 @@ test('editing with a changed amount drops stale amountExcl/tax; unchanged keeps 
 
   const go2 = vi.fn();
   render(<AddEntry onGo={go2} initial={e} />);
-  fireEvent.click((await screen.findAllByRole('button', { name: '5' })).at(-1)!);
+  await screen.findAllByText('Metro'); tap('5');
   fireEvent.click((await screen.findAllByRole('button', { name: 'Save expense' })).at(-1)!);
   await waitFor(() => expect(go2).toHaveBeenCalledWith('home'));
   const saved = (await db.entries.get(e.id))!;
@@ -275,7 +277,7 @@ test('paid now: the auto payment has the id paid:<entryId>; an edit rewrites tha
   expect((await db.payments.toArray()).map((p) => p.id)).toEqual([`paid:${e.id}`]);
   const go2 = vi.fn();
   render(<AddEntry onGo={go2} initial={e} />);
-  fireEvent.click((await screen.findAllByRole('button', { name: '0' })).at(-1)!);
+  await screen.findAllByText('Metro'); tap('0');
   fireEvent.click((await screen.findAllByRole('button', { name: 'Save expense' })).at(-1)!);
   await waitFor(() => expect(go2).toHaveBeenCalledWith('home'));
   const pays = await db.payments.toArray();

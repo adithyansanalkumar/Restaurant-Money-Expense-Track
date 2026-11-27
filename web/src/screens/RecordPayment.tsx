@@ -1,8 +1,7 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { Glass } from '../ui/Glass';
-import { Keypad } from '../ui/Keypad';
+import { AmountInput } from '../ui/AmountInput';
 import { useMoney } from '../ui/useMoney';
-import { pressKey, type KeypadKey } from '../domain/keypad';
 import { parseAmount } from '../domain/money';
 import { todayISO } from '../domain/clock';
 import { allocatePayment } from '../domain/credit';
@@ -32,7 +31,7 @@ export function RecordPayment({ supplier, entries, payments, onDone, onCancel }:
   const { fmt, currency, locale } = useMoney();
   const cur = useMemo(() => currencyParts(currency, locale), [currency, locale]);
   const sep = cur.sep;
-  const [display, setDisplay] = useState('0');
+  const [display, setDisplay] = useState('');
   const [date, setDate] = useState(todayISO());
   const [method, setMethod] = useState<Method>('cash');
   const [tooMuch, setTooMuch] = useState<number | null>(null);
@@ -41,7 +40,6 @@ export function RecordPayment({ supplier, entries, payments, onDone, onCancel }:
 
   const typed = display.endsWith(sep) ? display.slice(0, -1) : display;
   const cents = parseAmount(typed) ?? 0;
-  const shown = cur.before ? `${cur.symbol}${display}` : `${display} ${cur.symbol}`;
   const owedNow = useMemo(() => {
     const r = allocatePayment(supplier.id, 1, date, 'cash', entries, payments);
     return Array.isArray(r) ? null : r.owed;
@@ -85,7 +83,8 @@ export function RecordPayment({ supplier, entries, payments, onDone, onCancel }:
       <div style={{ textAlign: 'center', fontSize: 13, color: '#C6D8E6' }}>
         {owedNow !== null ? t('pay.owes', { supplier: supplier.name, owed: fmt(owedNow) }) : supplier.name}
       </div>
-      <div data-testid="amount" style={{ textAlign: 'center', fontFamily: "'Inter Tight', sans-serif", fontSize: 58, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05, color: OUT }}>{shown}</div>
+      <AmountInput value={display} onChange={(v) => { setTooMuch(null); setDisplay(v); }} sep={sep} symbol={cur.symbol}
+        symbolBefore={cur.before} color={OUT} label={t('add.amount')} />
       <Glass style={{ borderRadius: 24, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {METHODS.map((m) => (
@@ -99,7 +98,6 @@ export function RecordPayment({ supplier, entries, payments, onDone, onCancel }:
         </label>
       </Glass>
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Keypad decimalSep={sep} onKey={(k: KeypadKey) => { setTooMuch(null); setDisplay((d) => pressKey(d, k, sep)); }} />
         {tooMuch !== null && <div role="alert" style={{ color: OUT, fontSize: 13, textAlign: 'center' }}>{t('pay.tooMuch', { owed: fmt(tooMuch) })}</div>}
         {failed && <div role="alert" style={{ color: OUT, fontSize: 13, textAlign: 'center' }}>{t('pay.error')}</div>}
         <button type="button" disabled={cents <= 0 || busy} onClick={() => void confirm()} style={{
