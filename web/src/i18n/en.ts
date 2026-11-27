@@ -359,6 +359,12 @@ export const en = {
   'settings.lockBio': "Face ID",
   'settings.ocrShortDevice': "On phone",
   'settings.ocrShortGoogle': "Google AI",
+  'settings.delete': "Delete {name}",
+  'settings.deleteAsk': "Delete “{name}”? This can’t be undone.",
+  'settings.deleteYes': "Delete",
+  'settings.inUse': "“{name}” can’t be deleted: {n} saved entries use it.",
+  'settings.inUseArchive': "“{name}” can’t be deleted: {n} saved entries use it. Archive it instead to hide it from new entries.",
+  'settings.ok': "OK",
   'settings.saveError': "Could not save. Please try again.",
   'reports.savedDrive': "Saved to Google Drive",
 } as const;

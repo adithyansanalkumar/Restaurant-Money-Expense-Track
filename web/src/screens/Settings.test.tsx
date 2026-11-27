@@ -400,3 +400,45 @@ test('the Google AI key is saved when the screen goes away right after typing (M
   unmount();
   await waitFor(async () => expect((await db.meta.get('geminiKey'))?.value).toBe('AIzaUNMOUNT'));
 });
+
+test('delete: an unused category asks first, then is deleted (synced) and suppliers lose it as default', async () => {
+  await db.categories.put({ id: 'c-x', name: 'Spices', kind: 'expense', archived: false, updatedAt: 1, deviceId: 'd', deleted: false });
+  await db.suppliers.put({ id: 's-x', name: 'Metro', defaultCategoryId: 'c-x', updatedAt: 1, deviceId: 'd', deleted: false });
+  render(<Settings onGo={vi.fn()} />);
+  await open('Categories & suppliers');
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete Spices' }));
+  expect(await screen.findByText(/Delete “Spices”\?/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect((await db.categories.get('c-x'))!.deleted).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Spices' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+  await waitFor(async () => expect((await db.categories.get('c-x'))!.deleted).toBe(true));
+  expect((await db.categories.get('c-x'))!.updatedAt).toBeGreaterThan(1);
+  await waitFor(async () => expect((await db.suppliers.get('s-x'))!.defaultCategoryId).toBeUndefined());
+  await waitFor(() => expect(screen.queryByLabelText('Rename Spices')).toBeNull());
+});
+
+test('delete: a category or supplier used by entries is not deleted and says why', async () => {
+  await db.categories.put({ id: 'c-x', name: 'Spices', kind: 'expense', archived: false, updatedAt: 1, deviceId: 'd', deleted: false });
+  await db.suppliers.put({ id: 's-x', name: 'Metro', updatedAt: 1, deviceId: 'd', deleted: false });
+  await db.entries.put({ id: 'e1', kind: 'expense', date: '2026-11-20', amountIncl: 1000, categoryId: 'c-x', supplierId: 's-x', method: 'cash', status: 'paid', updatedAt: 1, deviceId: 'd', deleted: false } as any);
+  render(<Settings onGo={vi.fn()} />);
+  await open('Categories & suppliers');
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete Spices' }));
+  expect(await screen.findByText(/can’t be deleted: 1 saved entries use it\. Archive it/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Metro' }));
+  expect(await screen.findByText(/“Metro” can’t be deleted/)).toBeTruthy();
+  expect((await db.categories.get('c-x'))!.deleted).toBe(false);
+  expect((await db.suppliers.get('s-x'))!.deleted).toBe(false);
+});
+
+test('delete: an unused supplier can be deleted', async () => {
+  await db.suppliers.put({ id: 's-x', name: 'Metro', updatedAt: 1, deviceId: 'd', deleted: false });
+  render(<Settings onGo={vi.fn()} />);
+  await open('Categories & suppliers');
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete Metro' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+  await waitFor(async () => expect((await db.suppliers.get('s-x'))!.deleted).toBe(true));
+});

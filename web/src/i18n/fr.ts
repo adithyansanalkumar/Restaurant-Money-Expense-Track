@@ -361,6 +361,12 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   'settings.lockBio': "Face ID",
   'settings.ocrShortDevice': "Sur le téléphone",
   'settings.ocrShortGoogle': "Google IA",
+  'settings.delete': "Supprimer {name}",
+  'settings.deleteAsk': "Supprimer « {name} » ? C’est définitif.",
+  'settings.deleteYes': "Supprimer",
+  'settings.inUse': "« {name} » ne peut pas être supprimé : {n} opérations enregistrées l’utilisent.",
+  'settings.inUseArchive': "« {name} » ne peut pas être supprimé : {n} opérations enregistrées l’utilisent. Archivez-le pour le masquer des nouvelles saisies.",
+  'settings.ok': "OK",
   'settings.saveError': "Impossible d’enregistrer. Réessayez.",
   'reports.savedDrive': "Enregistré dans Google Drive",
 };
