@@ -31,9 +31,16 @@ Each one is marked **[COPY]** where you get it and **[PASTE]** where it goes.
    2. App name `Resto`, your email as support and developer contact.
    3. Scopes: add `openid`, `email` and `.../auth/drive.file`. (`drive.file` means the app can only see
       files it created or you picked for it, never the rest of your Drive.)
-   4. Publishing status: click **Publish app** so it says **In production**. If you leave it on "Testing",
-      sign-in stops working after 7 days. You may see an "unverified app" warning: that is normal for
-      a private app; the scopes above do not need Google's review.
+   4. **Branding links** (Google now requires them before you can publish). They need your Pages URL, so
+      do Step 4 first, then come back:
+      - Application home page: your Pages URL, for example `https://resto-xxx.pages.dev`
+      - Privacy policy link: your Pages URL followed by `/privacy.html` (this page is part of the app)
+      - Terms of service: leave empty.
+      - Authorised domains: add your Pages address without `https://`, for example `resto-xxx.pages.dev`.
+      - Do **not** upload a logo (a logo makes Google ask for a review).
+   5. Publishing status (on the **Audience** page): click **Publish app** so it says **In production**.
+      If you leave it on "Testing", sign-in stops working after 7 days. You may see an "unverified app"
+      warning when signing in: that is normal for a private app; the scopes above do not need Google's review.
 6. **Credentials**, **Create credentials**, **OAuth client ID**:
    1. Application type: **Web application**. Name `Resto web`.
    2. **Authorised JavaScript origins**: add your Pages URL (you get it in Step 4; you can come back and add it
@@ -84,8 +91,9 @@ Needs Node.js on the computer (https://nodejs.org, the "LTS" download). Open a t
 | `VITE_GOOGLE_APP_ID` | the project number | Step 1, point 3 |
 
 4. Save and deploy. When it finishes, **[COPY] the Pages URL**. Go back and paste it into: the OAuth client's
-   JavaScript origins (Step 1.6), the API key's website restriction (Step 1.7), and the worker's
-   `ALLOWED_ORIGINS` (Step 3.3, then run `npx wrangler deploy` again).
+   JavaScript origins (Step 1.6), the API key's website restriction (Step 1.7), the worker's
+   `ALLOWED_ORIGINS` (Step 3.3, then run `npx wrangler deploy` again), and the consent screen's Branding
+   links (Step 1.5, point 4). Then publish the consent screen (Step 1.5, point 5).
 5. Every time the code on GitHub changes, Pages rebuilds and updates the app by itself. If you change a
    variable, use "Retry deployment" so the change is picked up.
 
