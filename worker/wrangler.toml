@@ -1,0 +1,13 @@
+name = "resto-auth"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[vars]
+# Comma-separated list of origins allowed to call the worker.
+ALLOWED_ORIGINS = "http://localhost:5173,https://REPLACE-ME.pages.dev"
+
+[[kv_namespaces]]
+binding = "TOKENS"
+id = "REPLACE-WITH-KV-NAMESPACE-ID"
+
+# Secrets (set with `wrangler secret put`): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ENC_KEY
