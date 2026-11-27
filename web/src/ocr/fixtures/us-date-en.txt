@@ -1,0 +1,7 @@
+Lone Star Supply Co
+Invoice  11/25/2026
+
+Napkins              18.00
+Cups                 22.50
+Tax                   3.24
+Total                43.74
