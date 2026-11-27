@@ -47,3 +47,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes pin-shake { 0%,100% { transform: translateX(0) } 20%,60% { transform: translateX(-8px) } 40%,80% { transform: translateX(8px) } }
 .pin-shake { animation: pin-shake .35s ease-in-out; }
 @media (prefers-reduced-motion: reduce) { .pin-shake { animation: none; } }
+
+/* Big amount field: the "0" placeholder keeps the amount colour, just dimmer */
+[data-testid="amount"] input::placeholder { color: inherit; opacity: 0.45; }

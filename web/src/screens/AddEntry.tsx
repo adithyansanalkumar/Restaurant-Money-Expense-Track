@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Glass } from '../ui/Glass';
-import { Keypad } from '../ui/Keypad';
+import { AmountInput } from '../ui/AmountInput';
 import { Segmented } from '../ui/Segmented';
 import type { Route } from '../ui/router';
-import { pressKey, type KeypadKey } from '../domain/keypad';
 import { parseAmount } from '../domain/money';
 import { todayISO } from '../domain/clock';
 import { paidNowId, paymentsForPaidNow } from '../domain/credit';
@@ -76,7 +75,7 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
   const sep = cur.sep;
 
   const [kind, setKind] = useState<Entry['kind']>(initial?.kind ?? 'expense');
-  const [display, setDisplay] = useState(() => (initial?.amountIncl ? formatTyped(initial.amountIncl, sep) : '0'));
+  const [display, setDisplay] = useState(() => (initial?.amountIncl ? formatTyped(initial.amountIncl, sep) : ''));
   const [supplierId, setSupplierId] = useState<Id | undefined>(initial?.supplierId);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -224,8 +223,6 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
     }
   };
 
-  const amountLabel = typed + (display.endsWith(sep) ? sep : '');
-  const shown = cur.before ? `${cur.symbol}${amountLabel}` : `${amountLabel} ${cur.symbol}`;
   const methodLabels: Record<Method, string> = {
     cash: t('method.cash'), card: t('method.card'), transfer: t('method.transfer'), other: t('method.other'),
   };
@@ -259,9 +256,8 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
         <div style={{ fontSize: 12, color: '#C6D8E6', letterSpacing: 0.4, textTransform: 'uppercase' }}>
           {kind === 'expense' ? t('add.amountIncl') : t('add.amount')}
         </div>
-        <div data-testid="amount" style={{ fontFamily: "'Inter Tight', sans-serif", fontSize: 58, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.05, color }}>
-          {shown}
-        </div>
+        <AmountInput value={display} onChange={setDisplay} sep={sep} symbol={cur.symbol} symbolBefore={cur.before}
+          color={color} label={kind === 'expense' ? t('add.amountIncl') : t('add.amount')} />
       </div>
 
       <Glass style={{ borderRadius: 24, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -354,7 +350,6 @@ export function AddEntry({ onGo, initial }: { onGo: (r: Route) => void; initial?
       </Glass>
 
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Keypad decimalSep={sep} onKey={(k: KeypadKey) => setDisplay((d) => pressKey(d, k, sep))} />
         {error && <div role="alert" style={{ color: OUT, fontSize: 13, textAlign: 'center' }}>{t('add.error')}</div>}
         <button type="button" disabled={cents <= 0 || busy} onClick={() => void save()} style={{
           height: 58, borderRadius: 29, border: 0, background: 'linear-gradient(160deg, #FFFFFF 0%, #DDF2FB 100%)',

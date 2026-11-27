@@ -43,7 +43,6 @@ export const en = {
   'add.expense': 'Expense',
   'add.collection': 'Collection',
   'add.scan': 'Scan a bill',
-  'add.deleteDigit': 'Delete digit',
   'add.amountIncl': 'Amount · incl. tax',
   'add.amount': 'Amount',
   'add.newSupplier': '+ New',
